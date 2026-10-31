@@ -37,6 +37,19 @@
   }
   checkVersion();
 
+  /* ---------- the app's real height ----------
+     Opened from the iPhone home screen, iOS sometimes reports the window as shorter than the screen (by the status
+     bar) until something makes it re-measure, which leaves the tab bar floating with a gap below it. Full screen, the
+     app is exactly the screen's height, so use that; in a browser tab use the window's. */
+  function setAppHeight() {
+    const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+    const h = standalone ? (innerWidth > innerHeight ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height)) : innerHeight;
+    document.documentElement.style.setProperty('--app-h', h + 'px');
+  }
+  setAppHeight();
+  for (const ev of ['resize', 'orientationchange', 'pageshow', 'focus']) window.addEventListener(ev, () => { setAppHeight(); setTimeout(setAppHeight, 300); });
+  if (window.visualViewport) visualViewport.addEventListener('resize', setAppHeight);
+
   /* ---------- dates ---------- */
   const pad = n => String(n).padStart(2, '0');
   const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -65,7 +78,7 @@
     cursor: today(),
     tab: 'dial', // the app always opens on the dial
     dial: 0, // minutes the dial is twisted ahead of now
-    span: 360, // how many minutes the dial shows (the Width fader: 1 to 12 hours, 6 by default)
+    span: 360, // how many minutes the dial shows: always six hours
     rows: [], byDay: new Map(), bdays: [], sleep: [], rec: [],
   };
   if (!['day', 'week', 'month', 'year'].includes(S.view)) S.view = 'week';
@@ -216,9 +229,8 @@
      The next few hours as half a clock face: now at the bottom, the end of the window at the top, running up the left
      side like the 6-to-12 half of a wall clock. One band per category; events are arcs on their band. It always starts
      at now. Twist it (drag around it, or scroll over it) to look ahead, anywhere up to 72 hours out; it stays wherever
-     it's let go. The Width fader beside it sets how much time the half face holds, from 1 to 12 hours (6 by default),
-     smoothly with no steps. Minutes here are counted from the start of today. */
-  const HORIZON = 72 * 60, SPAN_MIN = 60, SPAN_MAX = 720;
+     it's let go. The half face always holds six hours. Minutes here are counted from the start of today. */
+  const HORIZON = 72 * 60;
   const maxDial = () => HORIZON - S.span;
   const dialStart = () => nowMin() + Math.round(S.dial);
   function dialEvents(w0) {
@@ -294,16 +306,6 @@
     const h = Math.floor(m / 60), mm = Math.round(m % 60);
     return (h ? `${h}h ` : '') + (mm || !h ? `${mm}m ` : '') + 'ahead';
   }
-  // the Width fader: 12 hours at the top, 1 hour at the bottom
-  function fader() {
-    const f = (S.span - SPAN_MIN) / (SPAN_MAX - SPAN_MIN), h = S.span / 60, v = Number.isInteger(Math.round(h * 10) / 10) ? Math.round(h * 10) / 10 : (Math.round(h * 10) / 10).toFixed(1);
-    return `<div class="fader" id="fdSpan" role="slider" tabindex="0" aria-label="Time width" aria-orientation="vertical" aria-valuemin="1" aria-valuemax="12" aria-valuenow="${(S.span / 60).toFixed(1)}" aria-valuetext="${esc(spanText(S.span))}">
-      <span class="fd-end">12h</span>
-      <span class="fd-track"><span class="fd-fill" style="height:${f * 100}%"></span><span class="fd-thumb" style="bottom:${f * 100}%">${v}h</span></span>
-      <span class="fd-end">1h</span>
-      <span class="fd-name">Width</span>
-    </div>`;
-  }
   function dialCard() {
     const w0 = dialStart(), evs = dialEvents(w0), live = Math.round(S.dial) === 0;
     const d = addDays(parse(today()), Math.floor(w0 / 1440));
@@ -315,7 +317,6 @@
       <div class="hero-in">
         <div class="cc-dial">
           <div class="cc-badge"><small>${esc(fmt(d, { weekday: 'long' }))}</small><b>${d.getDate()}</b></div>
-          ${fader()}
           <div class="cc-win${MV ? ' moving' : ''}">${MV
             ? `<small>Move to</small><b>${dialTime(MV.s, true)} – ${dialTime(MV.s + MV.dur, true)}</b>`
             : `<small>${live ? 'Next ' + esc(spanText(S.span)) : ahead(S.dial)}</small><b>${dialTime(w0, true)} – ${dialTime(w0 + S.span, true)}</b>`}
@@ -470,7 +471,7 @@
     gridKey = S.view + S.cursor;
     document.title = 'Calendar · ' + title();
   }
-  /* Two tabs. Dial: a page of its own that never scrolls, so the only things that move are the dial and its fader.
+  /* Two tabs. Dial: a page of its own that never scrolls, so the only thing that moves is the dial.
      Calendar: the regular calendar, which scrolls like any page. */
   function tabs() {
     return `<nav class="tabs" aria-label="Tabs">
@@ -501,7 +502,7 @@
     if (fresh) v.innerHTML = `<section class="hero" id="dial"></section><div id="calTab">${bar()}<div id="cal"></div></div>${tabs()}`;
     setTab(S.tab, !fresh);
   }
-  setInterval(() => { if (S.user && !tw && !MV && !FD && $('#dial')) { if (S.tab === 'dial') paintDial(); else if (S.view === 'day' || S.view === 'week') renderCal(); } }, 60000);
+  setInterval(() => { if (S.user && !tw && !MV && $('#dial')) { if (S.tab === 'dial') paintDial(); else if (S.view === 'day' || S.view === 'week') renderCal(); } }, 60000);
 
   function go(dayStr, view) {
     S.cursor = dayStr;
@@ -753,13 +754,12 @@
   /* ---------- input ---------- */
   const byId = id => S.rows.find(r => String(r.id) === String(id));
 
-  /* On the dial, one finger does one of three things:
+  /* On the dial, one finger does one of two things:
      - drag around the center: twist the dial (turning it the way the hours run brings later hours down to the
        bottom; half a turn is one window's width). It stays wherever it's let go.
      - press and hold an event (half a second) without moving: the event lifts off; drag it around the dial to a new
-       time and let go to save it there, same length, to the nearest 5 minutes.
-     - drag the Width fader up and down: 1 to 12 hours, smoothly. */
-  let tw = null, twisted = false, holdT = null, FD = null;
+       time and let go to save it there, same length, to the nearest 5 minutes. */
+  let tw = null, twisted = false, holdT = null;
   const clampDial = m => Math.max(0, Math.min(maxDial(), m));
   const dialGeom = () => { const svg = $('#dial .clock'), r = svg.getBoundingClientRect(); return { cx: r.left + r.width * 240 / 244, cy: r.top + r.height * 246 / 500 }; };
   // the time under a point on the dial (only the left half counts; beyond the ends it sticks to them)
@@ -769,16 +769,8 @@
     const f = Math.max(0, Math.min(1, (a - Math.PI / 2) / Math.PI));
     return dialStart() + f * S.span;
   }
-  function setSpan(clientY) {
-    const tr = $('#fdSpan .fd-track').getBoundingClientRect();
-    const f = Math.max(0, Math.min(1, 1 - (clientY - tr.top) / tr.height));
-    S.span = Math.round(SPAN_MIN + f * (SPAN_MAX - SPAN_MIN));
-    S.dial = clampDial(S.dial);
-    paintDial();
-  }
   document.addEventListener('pointerdown', e => {
     if (e.button > 0) return;
-    if (e.target.closest('#fdSpan')) { FD = true; e.preventDefault(); setSpan(e.clientY); return; }
     const svg = e.target.closest('#dial .clock');
     if (!svg) return;
     const g = dialGeom();
@@ -797,7 +789,6 @@
     }
   });
   window.addEventListener('pointermove', e => {
-    if (FD) { setSpan(e.clientY); return; }
     if (MV) {
       MV.s = Math.round((minuteAt(e.clientX, e.clientY) - MV.grab) / 5) * 5;
       MV.s = Math.max(nowMin() - 1440, MV.s);
@@ -839,7 +830,6 @@
   }
   const endPointer = () => {
     clearTimeout(holdT);
-    if (FD) { FD = null; return; }
     if (MV) { dropMoved(); twisted = true; setTimeout(() => { twisted = false; }, 80); return; }
     if (!tw) return;
     if (tw.moved) { S.dial = Math.round(S.dial); paintDial(); twisted = true; setTimeout(() => { twisted = false; }, 80); }
@@ -847,22 +837,13 @@
   };
   window.addEventListener('pointerup', endPointer);
   window.addEventListener('pointercancel', endPointer);
-  // a scroll wheel or trackpad over the dial turns it smoothly; over the fader it changes the width
+  // a scroll wheel or trackpad over the dial turns it smoothly
   document.addEventListener('wheel', e => {
-    if (e.target.closest('#fdSpan')) { e.preventDefault(); S.span = Math.round(Math.max(SPAN_MIN, Math.min(SPAN_MAX, S.span - e.deltaY * 0.5))); S.dial = clampDial(S.dial); paintDial(); return; }
     if (!e.target.closest('#dial .clock')) return;
     e.preventDefault();
-    S.dial = Math.round(clampDial(S.dial + e.deltaY * 0.6 * (S.span / 360)));
+    S.dial = Math.round(clampDial(S.dial + e.deltaY * 0.6));
     paintDial();
   }, { passive: false });
-  document.addEventListener('keydown', e => {
-    if (!e.target.closest || !e.target.closest('#fdSpan')) return;
-    const d = { ArrowUp: 15, ArrowRight: 15, ArrowDown: -15, ArrowLeft: -15 }[e.key];
-    if (!d) return;
-    e.preventDefault(); e.stopPropagation();
-    S.span = Math.max(SPAN_MIN, Math.min(SPAN_MAX, S.span + d)); S.dial = clampDial(S.dial); paintDial();
-    $('#fdSpan').focus();
-  }, true);
   // long-pressing on iPhone would otherwise bring up the text/selection menu
   document.addEventListener('contextmenu', e => { if (e.target.closest('#dial')) e.preventDefault(); });
 
@@ -879,7 +860,6 @@
     const tb = t.closest('.tabs [data-tab]');
     if (tb) { setTab(tb.dataset.tab); return; }
     if (t.closest('[data-sleep]') && t.closest('#view')) { openSleep(); return; }
-    if (t.closest('#fdSpan')) return;
     const vb = t.closest('.bar [data-view]');
     if (vb) { go(S.cursor, vb.dataset.view); return; }
     const kb = t.closest('#edKind [data-kind]');
