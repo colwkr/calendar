@@ -12,36 +12,17 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-180.png">
 <title>Calendar</title>
-<script>window.APP_V = '20261031143348';</script>
+<script>window.APP_V = '20261031144920';</script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<link rel="stylesheet" href="app.css?v=20261031143348">
+<link rel="stylesheet" href="app.css?v=20261031144920">
 </head>
 <body>
-<div class="app" id="app">
-  <header class="top" id="top" hidden>
-    <div class="top-l">
-      <button type="button" class="ic" data-act="prev" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
-      <button type="button" class="ic" data-act="next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
-      <h1 id="title"></h1>
-    </div>
-    <div class="top-r">
-      <button type="button" class="pill" data-act="today">Today</button>
-      <div class="seg" role="tablist" id="seg">
-        <button type="button" data-view="day">Day</button>
-        <button type="button" data-view="week">Week</button>
-        <button type="button" data-view="month">Month</button>
-        <button type="button" data-view="year">Year</button>
-      </div>
-      <button type="button" class="pill solid" data-act="add"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New</span></button>
-      <button type="button" class="ic" data-act="menu" aria-label="Account"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5c1.2-3.3 3.8-5 7-5s5.8 1.7 7 5"/></svg></button>
-    </div>
-  </header>
-  <main id="view"></main>
-</div>
+<div class="app" id="app"><main id="view"></main></div>
+<button type="button" class="fab" id="fab" data-act="add" aria-label="New event" hidden><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
 <div class="scrim" id="scrim" hidden></div>
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" hidden></div>
 <div class="toast" id="toast" role="status" hidden></div>
-<script src="app.js?v=20261031143348"></script>
+<script src="app.js?v=20261031144920"></script>
 </body>
 </html>

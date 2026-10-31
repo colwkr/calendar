@@ -1,5 +1,6 @@
 /* Calendar — events live in Nerve (Supabase table public.cal_events), so other apps can read and add to them.
-   Views: Day (ring clock + left-to-right flow), Week (one row per day, hours left to right), Month, Year.
+   The page opens on the 6-Hour Dial (the next six hours, twistable up to 72 hours ahead). Below it is a regular
+   calendar: Day and Week as an hour-by-hour grid, Month, and Year.
    Birthdays are events with kind 'birthday': `day` is the date they were born, and they repeat every year. */
 (() => {
   'use strict';
@@ -48,19 +49,21 @@
   const toTime = m => `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`;
   const fmt = (d, o) => d.toLocaleDateString(undefined, o);
   function clock(m, short) {
+    m = Math.round(m);
     const h = Math.floor(m / 60) % 24, mm = m % 60, ap = h < 12 ? (short ? 'a' : ' AM') : (short ? 'p' : ' PM'), h12 = h % 12 || 12;
     return short && !mm ? h12 + ap : `${h12}:${pad(mm)}${ap}`;
   }
-  const hourLabel = h => (h % 12 || 12) + (h % 24 < 12 ? 'a' : 'p');
+  const hourLabel = h => (h % 12 || 12) + (h % 24 < 12 ? ' AM' : ' PM');
 
   /* ---------- state ---------- */
   const S = {
     user: null, ready: false, loaded: false, needsSetup: false,
-    view: store.get('view', 'day'),
+    view: store.get('view', 'week'),
     cursor: today(),
+    dial: 0, // minutes the 6-Hour Dial is twisted ahead of now
     rows: [], byDay: new Map(), bdays: [],
   };
-  if (!['day', 'week', 'month', 'year'].includes(S.view)) S.view = 'day';
+  if (!['day', 'week', 'month', 'year'].includes(S.view)) S.view = 'week';
 
   /* ---------- data: Nerve, or an in-memory copy for the local preview ---------- */
   const DEMO = !!window.CAL_DEMO;
@@ -128,7 +131,7 @@
   }
   const timed = list => list.filter(o => !o.allDay);
 
-  // packs overlapping events into rows; returns how many rows it needed
+  // gives each of a group of overlapping events a column; returns how many columns the group needs
   function lanes(items) {
     const ends = [];
     items.sort((a, b) => a.s - b.s || b.e - a.e);
@@ -139,20 +142,13 @@
     }
     return Math.max(1, ends.length);
   }
-  // the hours shown left to right: 6a–10p, widened to fit anything earlier or later
-  function span(list) {
-    let a = 6 * 60, b = 22 * 60;
-    for (const o of list) if (!o.allDay) { a = Math.min(a, Math.floor(o.s / 60) * 60); b = Math.max(b, Math.ceil(o.e / 60) * 60); }
-    return [a, b];
-  }
 
-  /* ---------- rings ---------- */
-  // noon at the top, midnight at the bottom, so the waking day fills the top of the dial
+  /* ---------- small day rings (month view) ---------- */
   const pt = (c, r, m) => { const a = ((m - 720) / 1440) * 2 * Math.PI - Math.PI / 2; return [(c + r * Math.cos(a)).toFixed(2), (c + r * Math.sin(a)).toFixed(2)]; };
-  function arc(c, r, s, e, reverse) {
+  function arc(c, r, s, e) {
     e = Math.min(e, s + 1439);
     const [x1, y1] = pt(c, r, s), [x2, y2] = pt(c, r, e), large = e - s > 720 ? 1 : 0;
-    return reverse ? `M${x2} ${y2}A${r} ${r} 0 ${large} 0 ${x1} ${y1}` : `M${x1} ${y1}A${r} ${r} 0 ${large} 1 ${x2} ${y2}`;
+    return `M${x1} ${y1}A${r} ${r} 0 ${large} 1 ${x2} ${y2}`;
   }
   function miniRing(dayStr, size) {
     const c = size / 2, r = c - 3;
@@ -160,24 +156,24 @@
     return `<svg class="mini" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" aria-hidden="true"><circle cx="${c}" cy="${c}" r="${r}" class="mini-track"/>${arcs}</svg>`;
   }
 
-  /* The 6-Hour Dial: the next six hours as half a clock face — now at the bottom, six hours from now at the top,
-     running up the left side like the 6-to-12 half of a wall clock. One band per category; events are arcs on their
-     band. It always starts at now, whatever day the rest of the page shows. Twist it (drag around the dial, or scroll)
-     to look ahead six hours at a time, up to 72 hours out; it settles on the nearest six-hour step when let go.
-     Minutes below are counted from the start of today. */
+  /* ---------- the 6-Hour Dial ----------
+     The next six hours as half a clock face: now at the bottom, six hours later at the top, running up the left side
+     like the 6-to-12 half of a wall clock. One band per category; events are arcs on their band. It always starts at
+     now. Twist it (drag around it, or scroll over it) to look ahead, anywhere up to 72 hours out; it stays wherever
+     it's let go. Minutes here are counted from the start of today. */
   const SPAN = 360, AHEAD = 72 * 60 - SPAN;
-  S.dial = 0; // minutes twisted ahead of now
   const dialStart = () => nowMin() + Math.round(S.dial);
   function dialEvents(w0) {
     const out = [];
     for (let i = 0; i < 4; i++) out.push(...timed(occs(ymd(addDays(parse(today()), i)))).map(o => ({ ...o, s: o.s + i * 1440, e: o.e + i * 1440 })));
     return out.filter(o => o.e > w0 && o.s < w0 + SPAN).sort((a, b) => a.s - b.s);
   }
+  const dialTime = (m, short) => (m >= 1440 ? fmt(addDays(parse(today()), Math.floor(m / 1440)), { weekday: 'short' }) + ' ' : '') + clock(m % 1440, short);
   function sixHours(w0, evs) {
     const CX = 240, CY = 246, W = 22, R = { work: 222, meet: 196, personal: 170, travel: 144 }, FACE = 128;
     const P = (r, m) => { const a = Math.PI / 2 + ((m - w0) / SPAN) * Math.PI; return [(CX + r * Math.cos(a)).toFixed(2), (CY + r * Math.sin(a)).toFixed(2)]; };
     const half = (r, s, e, rev) => { const [x1, y1] = P(r, s), [x2, y2] = P(r, e); return rev ? `M${x2} ${y2}A${r} ${r} 0 0 0 ${x1} ${y1}` : `M${x1} ${y1}A${r} ${r} 0 0 1 ${x2} ${y2}`; };
-    let s = `<svg class="clock" viewBox="0 0 244 500" role="img" aria-label="6-Hour Dial, ${clock(w0 % 1440)} to ${clock((w0 + SPAN) % 1440)}. Twist to look further ahead.">`;
+    let s = `<svg class="clock" viewBox="0 0 244 500" role="img" aria-label="6-Hour Dial, ${dialTime(w0)} to ${dialTime(w0 + SPAN)}. Twist to look further ahead.">`;
     for (const k of CAT_KEYS) s += `<path d="${half(R[k], w0, w0 + SPAN)}" class="band" stroke-width="${W}"/>`;
     s += `<path d="${half(FACE, w0, w0 + SPAN)}L${CX} ${CY}Z" class="face"/>`;
     for (let m = Math.ceil(w0 / 15) * 15; m <= w0 + SPAN; m += 15) {
@@ -190,137 +186,95 @@
       const k = CATS[o.cat] ? o.cat : 'personal', r = R[k], a = Math.max(o.s, w0), b = Math.min(Math.max(o.e, o.s + 10), w0 + SPAN);
       if (b <= a) continue;
       const len = ((b - a) / SPAN) * Math.PI * r, id = `ev${i++}`;
-      s += `<path d="${half(r, a, b)}" class="ev-arc" stroke-width="${W - 2}" style="stroke:var(--${k})" data-id="${o.r.id}"><title>${esc(o.title)} · ${clock(o.s % 1440)}–${clock(o.e % 1440)}</title></path>`;
+      s += `<path d="${half(r, a, b)}" class="ev-arc" stroke-width="${W - 2}" style="stroke:var(--${k})" data-id="${o.r.id}"><title>${esc(o.title)} · ${dialTime(o.s)}–${dialTime(o.e)}</title></path>`;
       if (len > 34) {
         const max = Math.floor((len - 14) / 6.2), t = o.title.length > max ? o.title.slice(0, Math.max(1, max - 1)) + '…' : o.title;
         // near the bottom the arc runs right to left, so the label is drawn the other way to stay upright
         s += `<path id="${id}" d="${half(r, a, b, (a + b) / 2 - w0 < 120)}" fill="none"/><text class="ev-lab" dy="4" data-id="${o.r.id}"><textPath href="#${id}" startOffset="9">${esc(t)}</textPath></text>`;
       }
     }
-    // now: a red mark at the bottom where the window begins
+    // the start of the window: a mark at the bottom, red while it's now
     s += `<line x1="${CX - 1}" y1="${CY + FACE}" x2="${CX - 1}" y2="${CY + 237}" class="hand"/><text x="${CX - 8}" y="${CY + 250}" class="c-now">${clock(w0 % 1440)}</text>`;
     return s + '</svg>';
   }
-  // a time on the dial, with its weekday when it isn't today
-  const dialTime = (m, short) => (m >= 1440 ? fmt(addDays(parse(today()), Math.floor(m / 1440)), { weekday: 'short' }) + ' ' : '') + clock(m % 1440, short);
-  // under the dial: what's on at the start of the window and what's next in it
   function upNext(w0, evs, live) {
     const cur = evs.find(o => o.s <= w0 && o.e > w0), nxt = evs.find(o => o.s > w0);
     const row = (k, o, when) => `<button type="button" class="up" data-id="${o.r.id}"><i style="background:var(--${o.cat})"></i><small>${k}</small><b>${esc(o.title)}</b><em>${when}</em></button>`;
     if (!cur && !nxt) return '<p class="up-none">Nothing in these six hours.</p>';
     return (cur ? row(live ? 'Now' : 'On', cur, `until ${dialTime(cur.e)}`) : '') + (nxt ? row('Next', nxt, dialTime(nxt.s)) : '');
   }
-  function dialCard() {
-    const w0 = dialStart(), evs = dialEvents(w0), live = S.dial === 0, step = Math.round(S.dial / SPAN);
-    const d = addDays(parse(today()), Math.floor(w0 / 1440));
-    return `<h2>6-Hour Dial</h2>
-      ${live ? '' : '<button type="button" class="pill cc-back" data-act="dial-now">Now</button>'}
-      <div class="cc-dial">
-        <div class="cc-badge"><small>${esc(fmt(d, { weekday: 'long' }))}</small><b>${d.getDate()}</b></div>
-        <div class="cc-win"><small>${live ? 'Next 6 hours' : `${step * 6} hours ahead`}</small><b>${dialTime(w0, true)} – ${dialTime(w0 + SPAN, true)}</b>
-          <span class="cc-steps" aria-hidden="true">${[...Array(12)].map((_, i) => `<i${i === step ? ' class="on"' : ''}></i>`).join('')}</span></div>
-        ${sixHours(w0, evs)}
-      </div>
-      <div class="cc-up">${upNext(w0, evs, live)}</div>
-      <div class="legend">${CAT_KEYS.map(k => `<span><i style="background:var(--${k})"></i>${CATS[k]}</span>`).join('')}</div>`;
+  function ahead(m) {
+    const h = Math.floor(m / 60), mm = Math.round(m % 60);
+    return (h ? `${h}h ` : '') + (mm || !h ? `${mm}m ` : '') + 'ahead';
   }
-  // redraws just the dial (while it's being twisted, the rest of the page stays put)
+  function dialCard() {
+    const w0 = dialStart(), evs = dialEvents(w0), live = Math.round(S.dial) === 0;
+    const d = addDays(parse(today()), Math.floor(w0 / 1440));
+    return `<div class="hero-top"><h2>6-Hour Dial</h2>
+        <div class="hero-act">${live ? '' : '<button type="button" class="pill sm" data-act="dial-now">Now</button>'}
+        <button type="button" class="ic" data-act="menu" aria-label="Account"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5c1.2-3.3 3.8-5 7-5s5.8 1.7 7 5"/></svg></button></div></div>
+      <div class="hero-in">
+        <div class="cc-dial">
+          <div class="cc-badge"><small>${esc(fmt(d, { weekday: 'long' }))}</small><b>${d.getDate()}</b></div>
+          <div class="cc-win"><small>${live ? 'Next 6 hours' : ahead(S.dial)}</small><b>${dialTime(w0, true)} – ${dialTime(w0 + SPAN, true)}</b>
+            <span class="cc-prog" aria-hidden="true"><i style="width:${(S.dial / AHEAD) * 100}%"></i></span></div>
+          ${sixHours(w0, evs)}
+        </div>
+        <div class="cc-up">${upNext(w0, evs, live)}</div>
+        <div class="legend">${CAT_KEYS.map(k => `<span><i style="background:var(--${k})"></i>${CATS[k]}</span>`).join('')}</div>
+      </div>
+      <button type="button" class="hero-more" data-act="to-cal">Calendar<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>`;
+  }
   function paintDial() {
     const el = $('#dial'); if (!el) return;
-    el.classList.toggle('live', S.dial === 0);
+    el.classList.toggle('live', Math.round(S.dial) === 0);
     el.innerHTML = dialCard();
   }
 
-  /* ---------- views ---------- */
-  function vDay() {
-    const d = parse(S.cursor), list = occs(S.cursor), tl = timed(list), allDay = list.filter(o => o.allDay);
-    // seven mini rings, the chosen day in the middle
-    let strip = '';
-    for (let i = -3; i <= 3; i++) {
-      const dd = addDays(d, i), k = ymd(dd);
-      strip += `<button type="button" class="dchip${i === 0 ? ' on' : ''}${k === today() ? ' today' : ''}" data-go="${k}">${miniRing(k, 54)}<span class="dchip-t"><small>${esc(fmt(dd, { weekday: 'short' }))}</small><b>${dd.getDate()}</b></span></button>`;
+  /* ---------- the calendar: day and week as an hour grid ---------- */
+  const HOUR = 48;
+  function placeEvents(tl) {
+    // overlapping events share the column side by side
+    const items = tl.map(o => ({ ...o })).sort((a, b) => a.s - b.s || b.e - a.e);
+    let group = [], end = -1, out = '';
+    const flush = () => {
+      const n = lanes(group);
+      for (const o of group) {
+        const h = Math.max(20, ((o.e - o.s) / 60) * HOUR - 2);
+        out += `<button type="button" class="tg-ev${h < 36 ? ' short' : ''}" data-id="${o.r.id}" style="top:${(o.s / 60) * HOUR}px;height:${h}px;left:calc(${(o.lane / n) * 100}% + 2px);width:calc(${100 / n}% - 4px);--c:var(--${o.cat})">
+          <b>${esc(o.title)}</b><small>${clock(o.s, true)} – ${clock(o.e, true)}${o.r.place ? ', ' + esc(o.r.place) : ''}</small></button>`;
+      }
+      group = [];
+    };
+    for (const o of items) {
+      if (group.length && o.s >= end) { flush(); end = -1; }
+      group.push(o); end = Math.max(end, o.e);
     }
-    const agenda = list.length ? list.map(o => `
-      <button type="button" class="ag" data-id="${o.r.id}">
-        <span class="ag-time">${o.allDay ? (o.bday ? 'Birthday' : 'All day') : `${clock(o.s)}<small>${clock(o.e)}</small>`}</span>
-        <span class="ag-bar" style="background:var(--${o.cat})"></span>
-        <span class="ag-main"><b>${esc(o.title)}</b>${o.r.place ? `<small>${esc(o.r.place)}</small>` : ''}${o.r.notes && !o.bday ? `<small class="ag-notes">${esc(o.r.notes)}</small>` : ''}</span>
-      </button>`).join('') : `<div class="empty"><b>Nothing on ${esc(fmt(d, { weekday: 'long' }))}.</b><span>Tap <em>New</em> to add an event.</span></div>`;
-    return `
-      <div class="strip">${strip}</div>
-      <div class="day">
-        <section class="card clock-card${S.dial === 0 ? ' live' : ''}" id="dial">${dialCard()}</section>
-        <div class="day-r">
-          <section class="card">
-            <h2>Flow</h2>
-            ${allDay.length ? `<div class="chips">${allDay.map(o => `<button type="button" class="chip" data-id="${o.r.id}"><i style="background:var(--${o.cat})"></i>${esc(o.title)}</button>`).join('')}</div>` : ''}
-            ${flow(S.cursor, tl)}
-          </section>
-          <section class="card"><h2>Agenda</h2><div class="agenda">${agenda}</div></section>
-        </div>
-      </div>`;
+    if (group.length) flush();
+    return out;
   }
-
-  // the day left to right: one bar per event, lines carrying you from each thing to the next
-  function flow(dayStr, tl) {
-    const [a, b] = span(tl), len = b - a, X = m => ((m - a) / len) * 100;
-    const items = tl.map(o => ({ ...o })), n = lanes(items), LH = 58, TOP = 30, H = TOP + n * LH + 8;
-    let hours = '';
-    for (let m = a; m <= b; m += 60) hours += `<span class="fl-h" style="left:${X(m)}%">${hourLabel(m / 60)}</span>`;
-    const yMid = it => TOP + it.lane * LH + (LH - 8) / 2;
-    const seq = [...items].sort((p, q) => p.s - q.s);
-    let lines = '', defs = '';
-    for (let i = 1; i < seq.length; i++) {
-      const p = seq[i - 1], q = seq[i];
-      if (q.s < p.e) continue;
-      const x1 = X(p.e) * 10, x2 = X(q.s) * 10, xm = (x1 + x2) / 2, y1 = yMid(p), y2 = yMid(q), g = `fg${i}`;
-      defs += `<linearGradient id="${g}" gradientUnits="userSpaceOnUse" x1="${x1}" y1="0" x2="${Math.max(x2, x1 + 1)}" y2="0"><stop offset="0" style="stop-color:var(--${p.cat})"/><stop offset="1" style="stop-color:var(--${q.cat})"/></linearGradient>`;
-      lines += `<path d="M${x1} ${y1}H${xm}V${y2}H${x2}" stroke="url(#${g})"/>`;
-    }
-    const bars = items.map(o => `
-      <button type="button" class="fl-ev" data-id="${o.r.id}" style="left:${X(o.s)}%;width:calc(${X(o.e) - X(o.s)}% - 3px);top:${TOP + o.lane * LH}px;--c:var(--${o.cat})">
-        <b>${esc(o.title)}</b><small>${clock(o.s, true)}–${clock(o.e, true)}${o.r.place ? ' · ' + esc(o.r.place) : ''}</small>
-      </button>`).join('');
-    const now = dayStr === today() && nowMin() >= a && nowMin() <= b ? `<span class="now" style="left:${X(nowMin())}%"></span>` : '';
-    return `<div class="flow-wrap"><div class="flow" style="height:${H}px;min-width:${(len / 60) * 84}px" data-day="${dayStr}" data-a="${a}" data-b="${b}">
-      <div class="fl-grid">${hours}</div>
-      <svg class="fl-lines" viewBox="0 0 1000 ${H}" preserveAspectRatio="none" aria-hidden="true"><defs>${defs}</defs>${lines}</svg>
-      ${bars}${now}
-      ${tl.length ? '' : '<span class="fl-empty">No timed events. Click anywhere here to add one.</span>'}
-    </div></div>`;
-  }
-
-  function vWeek() {
-    const w0 = weekStart(parse(S.cursor)), days = [...Array(7)].map((_, i) => addDays(w0, i));
-    const all = days.map(d => occs(ymd(d)));
-    const [a, b] = span(all.flat()), len = b - a, X = m => ((m - a) / len) * 100;
-    let hours = '';
-    for (let m = a; m <= b; m += 60) hours += `<span class="fl-h" style="left:${X(m)}%">${hourLabel(m / 60)}</span>`;
-    const rows = days.map((d, i) => {
-      const k = ymd(d), list = all[i], tl = timed(list).map(o => ({ ...o })), n = lanes(tl), LH = 40;
-      const allDay = list.filter(o => o.allDay), top = allDay.length ? 26 : 6, h = Math.max(56, top + n * LH + 6);
-      const we = d.getDay() === 0 || d.getDay() === 6;
-      const now = k === today() && nowMin() >= a && nowMin() <= b ? `<span class="now" style="left:${X(nowMin())}%"></span>` : '';
-      return `<div class="wk-row${we ? ' we' : ''}${k === today() ? ' today' : ''}">
-        <button type="button" class="wk-day" data-go="${k}" data-view-to="day"><small>${esc(fmt(d, { weekday: 'short' }))}</small><b>${d.getDate()}</b></button>
-        <div class="wk-track flow" style="height:${h}px" data-day="${k}" data-a="${a}" data-b="${b}">
-          <div class="fl-grid">${hours.replace(/>[^<]+</g, '><')}</div>
-          ${allDay.length ? `<div class="wk-all">${allDay.map(o => `<button type="button" class="chip sm" data-id="${o.r.id}"><i style="background:var(--${o.cat})"></i>${esc(o.title)}</button>`).join('')}</div>` : ''}
-          ${tl.map(o => `<button type="button" class="fl-ev sm" data-id="${o.r.id}" style="left:${X(o.s)}%;width:calc(${X(o.e) - X(o.s)}% - 3px);top:${top + o.lane * LH}px;--c:var(--${o.cat})"><b>${esc(o.title)}</b><small>${clock(o.s, true)}–${clock(o.e, true)}</small></button>`).join('')}
-          ${now}
-        </div>
-      </div>`;
+  function timeGrid(days) {
+    const keys = days.map(ymd), lists = keys.map(occs), t = today(), multi = days.length > 1;
+    const chip = o => `<button type="button" class="chip sm" data-id="${o.r.id}"><i style="background:var(--${o.cat})"></i>${esc(o.title)}</button>`;
+    const head = `<div class="tg-row tg-head"><span class="tg-gut"></span>${days.map((d, i) => `
+      <button type="button" class="tg-dh${keys[i] === t ? ' today' : ''}" data-go="${keys[i]}"${multi ? ' data-view-to="day"' : ''}><small>${esc(fmt(d, { weekday: 'short' }))}</small><b>${d.getDate()}</b></button>`).join('')}</div>`;
+    const anyAll = lists.some(l => l.some(o => o.allDay));
+    const all = anyAll ? `<div class="tg-row tg-all"><span class="tg-gut">all day</span>${lists.map(l => `<div class="tg-allc">${l.filter(o => o.allDay).map(chip).join('')}</div>`).join('')}</div>` : '';
+    let gutter = '';
+    for (let h = 1; h < 24; h++) gutter += `<span style="top:${h * HOUR}px">${hourLabel(h)}</span>`;
+    const cols = lists.map((l, i) => {
+      const now = keys[i] === t ? `<span class="tg-now" style="top:${(nowMin() / 60) * HOUR}px"></span>` : '';
+      return `<div class="tg-col${keys[i] === t ? ' today' : ''}" data-day="${keys[i]}">${placeEvents(timed(l))}${now}</div>`;
     }).join('');
-    return `<section class="card week"><div class="wk-scroll"><div class="wk-inner">
-      <div class="wk-row wk-head"><span class="wk-day"></span><div class="wk-track"><div class="fl-grid">${hours}</div></div></div>
-      ${rows}
-    </div></div></section>`;
+    return `<section class="card tg" style="--n:${days.length}">${head}${all}
+      <div class="tg-scroll"><div class="tg-row tg-body" style="height:${24 * HOUR}px"><div class="tg-gut tg-hours">${gutter}</div>${cols}</div></div></section>`;
   }
+  const vDay = () => timeGrid([parse(S.cursor)]);
+  const vWeek = () => { const w0 = weekStart(parse(S.cursor)); return timeGrid([...Array(7)].map((_, i) => addDays(w0, i))); };
 
   function weekdayHeads(short) {
     return [...Array(7)].map((_, i) => `<span>${esc(fmt(new Date(2023, 0, 1 + ((i + WEEK_START) % 7)), { weekday: short ? 'narrow' : 'short' }))}</span>`).join('');
   }
-
   function vMonth() {
     const d = parse(S.cursor), first = new Date(d.getFullYear(), d.getMonth(), 1), g0 = weekStart(first);
     const weeks = Math.ceil(((first.getDay() - WEEK_START + 7) % 7 + dim(d)) / 7);
@@ -334,9 +288,8 @@
         ${list.length ? `<span class="mc-dots">${list.slice(0, 4).map(o => `<i style="background:var(--${o.cat})"></i>`).join('')}</span>` : ''}
       </div>`;
     }
-    return `<section class="card month"><div class="mh">${weekdayHeads()}</div><div class="mg" style="--weeks:${weeks}">${cells}</div></section>`;
+    return `<section class="card month"><div class="mh">${weekdayHeads()}</div><div class="mg">${cells}</div></section>`;
   }
-
   function vYear() {
     const y = parse(S.cursor).getFullYear();
     let out = '';
@@ -354,7 +307,7 @@
 
   function vLogin() {
     return `<div class="login card"><form id="loginForm">
-      <div class="logo">${miniRingStatic()}</div>
+      <div class="logo"><img src="icon.svg" width="56" height="56" alt=""></div>
       <h1>Calendar</h1>
       <p class="muted">Sign in with your Nerve account.</p>
       <label class="f"><span>Email</span><input id="l_email" type="email" autocomplete="email" autocapitalize="off" spellcheck="false" required></label>
@@ -363,10 +316,6 @@
       <button type="submit" class="pill solid big" id="l_go">Sign in</button>
     </form></div>`;
   }
-  function miniRingStatic() {
-    return `<svg viewBox="0 0 48 48" width="56" height="56" aria-hidden="true"><circle cx="24" cy="24" r="19" class="mini-track" style="stroke-width:5"/><path d="${arc(24, 19, 1300, 1700)}" style="stroke:var(--work);stroke-width:5;fill:none;stroke-linecap:round"/><path d="${arc(24, 19, 160, 420)}" style="stroke:var(--meet);stroke-width:5;fill:none;stroke-linecap:round"/><path d="${arc(24, 19, 520, 860)}" style="stroke:var(--personal);stroke-width:5;fill:none;stroke-linecap:round"/></svg>`;
-  }
-
   function vSetup() {
     return `<div class="login card setup"><h1>One-time setup</h1>
       <p class="muted">Nerve doesn't have the calendar's table yet. Open the Nerve project's SQL editor in Supabase, paste in <b>calendar-setup.sql</b>, and press Run. Then reload this page.</p>
@@ -383,44 +332,62 @@
     if (S.view === 'month') return fmt(d, { month: 'long', year: 'numeric' });
     return String(d.getFullYear());
   }
+  function bar() {
+    return `<div class="bar" id="bar">
+      <div class="bar-l">
+        <button type="button" class="ic" data-act="prev" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+        <button type="button" class="ic" data-act="next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+        <h1 id="title">${esc(title())}</h1>
+      </div>
+      <div class="bar-r">
+        <button type="button" class="pill" data-act="today">Today</button>
+        <div class="seg" role="tablist">${['day', 'week', 'month', 'year'].map(v => `<button type="button" data-view="${v}" aria-selected="${v === S.view}">${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}</div>
+      </div>
+    </div>`;
+  }
 
+  // the calendar part only (keeps the dial and the page scroll where they are)
+  let gridKey = null;
+  function renderCal() {
+    const cal = $('#cal'); if (!cal) return;
+    const sc = cal.querySelector('.tg-scroll'), keep = sc && gridKey === S.view + S.cursor ? sc.scrollTop : null;
+    $('#bar').outerHTML = bar();
+    cal.innerHTML = ({ day: vDay, week: vWeek, month: vMonth, year: vYear }[S.view])();
+    const sc2 = cal.querySelector('.tg-scroll');
+    if (sc2) {
+      // opens a little before now when today is showing, otherwise at 7 AM
+      const showsToday = S.view === 'day' ? S.cursor === today() : weekStart(parse(S.cursor)) <= new Date() && new Date() < addDays(weekStart(parse(S.cursor)), 7);
+      sc2.scrollTop = keep != null ? keep : ((showsToday ? Math.max(0, nowMin() - 90) : 7 * 60) / 60) * HOUR;
+    }
+    gridKey = S.view + S.cursor;
+    document.title = 'Calendar · ' + title();
+  }
   function render() {
-    if (sheetOpen() && editing()) return;
+    if ($('#sheet') && !$('#sheet').hidden && editing()) return;
     const v = $('#view'), signed = !!S.user;
-    $('#top').hidden = !signed || S.needsSetup;
+    $('#fab').hidden = !signed || S.needsSetup || !S.loaded;
     if (!S.ready) { v.innerHTML = ''; return; }
     if (!signed) { v.innerHTML = vLogin(); document.title = 'Calendar'; return; }
     if (S.needsSetup) { v.innerHTML = vSetup(); return; }
-    $('#title').textContent = title();
-    document.querySelectorAll('#seg button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === S.view)));
-    const sx = (v.querySelector('.wk-scroll') || {}).scrollLeft || 0;
-    const ofw = v.querySelector('.flow-wrap'), prevFlow = ofw ? { day: ofw.firstElementChild.dataset.day, left: ofw.scrollLeft } : null;
-    v.className = 'v-' + S.view;
-    v.innerHTML = S.loaded ? ({ day: vDay, week: vWeek, month: vMonth, year: vYear }[S.view])() : '<div class="loading"></div>';
-    const ws = v.querySelector('.wk-scroll'); if (ws) ws.scrollLeft = sx;
-    // the day's flow opens on now (today) or on the first event, a little before it
-    const fw = v.querySelector('.flow-wrap'), fl = fw && fw.firstElementChild;
-    if (fl) {
-      if (prevFlow && prevFlow.day === S.cursor) fw.scrollLeft = prevFlow.left;
-      else {
-        const a = +fl.dataset.a, b = +fl.dataset.b, first = timed(occs(S.cursor))[0];
-        const at = S.cursor === today() ? nowMin() - 90 : first ? first.s - 30 : 8 * 60;
-        fw.scrollLeft = Math.max(0, ((at - a) / (b - a)) * fl.offsetWidth);
-      }
+    if (!S.loaded) { v.innerHTML = '<div class="loading"></div>'; return; }
+    if (!$('#dial')) {
+      v.innerHTML = `<section class="hero${Math.round(S.dial) === 0 ? ' live' : ''}" id="dial"></section>${bar()}<div id="cal"></div>`;
+      gridKey = null;
     }
-    document.title = 'Calendar · ' + title();
+    paintDial();
+    renderCal();
   }
-  setInterval(() => { if (S.user && (S.view === 'day' || S.view === 'week')) render(); }, 60000);
+  setInterval(() => { if (S.user && !tw) { paintDial(); if (S.view === 'day' || S.view === 'week') renderCal(); } }, 60000);
 
   function go(dayStr, view) {
     S.cursor = dayStr;
     if (view) { S.view = view; store.set('view', view); }
-    render();
+    renderCal();
   }
   function step(n) {
     const d = parse(S.cursor);
     S.cursor = ymd(S.view === 'day' ? addDays(d, n) : S.view === 'week' ? addDays(d, 7 * n) : S.view === 'month' ? addMonths(d, n) : addMonths(d, 12 * n));
-    render();
+    renderCal();
   }
 
   /* ---------- the editor ---------- */
@@ -434,7 +401,7 @@
       end_time: null,
     };
     if (!row && !r.end_time) r.end_time = toTime(Math.min(toMin(r.start_time) + 60, 1439));
-    ED = { id: row ? row.id : null, kind: r.kind, cat: r.category || 'personal', allDay: !r.start_time, orig: row };
+    ED = { id: row ? row.id : null, kind: r.kind, cat: r.category || 'personal', orig: row };
     $('#sheet').innerHTML = `<form id="edForm" novalidate>
       <div class="sh-head"><h2>${row ? 'Edit' : 'New'}</h2><button type="button" class="ic" data-act="close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       <div class="seg wide" id="edKind"><button type="button" data-kind="event">Event</button><button type="button" data-kind="birthday">Birthday</button></div>
@@ -534,9 +501,9 @@
   const byId = id => S.rows.find(r => String(r.id) === String(id));
 
   /* Twisting the 6-Hour Dial: drag around its center. Turning it the way the hours run brings later hours down to
-     the bottom; half a turn of the face is six hours. Let go and it settles on the nearest six-hour step. */
+     the bottom; half a turn of the face is six hours. It stays wherever it's let go. */
   let tw = null, twisted = false;
-  const settle = () => { S.dial = Math.max(0, Math.min(AHEAD, Math.round(S.dial / SPAN) * SPAN)); paintDial(); };
+  const clampDial = m => Math.max(0, Math.min(AHEAD, m));
   document.addEventListener('pointerdown', e => {
     const svg = e.target.closest('#dial .clock');
     if (!svg || e.button > 0) return;
@@ -550,35 +517,33 @@
     const a = Math.atan2(e.clientY - tw.cy, e.clientX - tw.cx);
     let d = a - tw.a; if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI;
     tw.a = a; tw.turned += d;
-    S.dial = Math.max(0, Math.min(AHEAD, tw.start - (tw.turned / Math.PI) * SPAN));
+    S.dial = clampDial(tw.start - (tw.turned / Math.PI) * SPAN);
     paintDial();
   });
   const endTwist = () => {
     if (!tw) return;
-    if (tw.moved) { settle(); twisted = true; setTimeout(() => { twisted = false; }, 80); }
+    if (tw.moved) { S.dial = Math.round(S.dial); paintDial(); twisted = true; setTimeout(() => { twisted = false; }, 80); }
     tw = null;
   };
   window.addEventListener('pointerup', endTwist);
   window.addEventListener('pointercancel', endTwist);
-  // a scroll wheel or trackpad over the dial turns it one step at a time
-  let wheelT = 0;
+  // a scroll wheel or trackpad over the dial turns it smoothly
   document.addEventListener('wheel', e => {
     if (!e.target.closest('#dial .clock')) return;
     e.preventDefault();
-    if (Date.now() - wheelT < 350 || Math.abs(e.deltaY) < 4) return;
-    wheelT = Date.now();
-    S.dial += e.deltaY > 0 ? SPAN : -SPAN; settle();
+    S.dial = Math.round(clampDial(S.dial + e.deltaY * 0.6));
+    paintDial();
   }, { passive: false });
 
-  // no pinch or double-tap zoom anywhere in the app (iOS Safari ignores the viewport tag's no-zoom, so stop the gestures)
+  // no pinch zoom anywhere in the app (iOS Safari ignores the viewport tag's no-zoom, so stop the gestures;
+  // app.css also limits touch to scrolling, which rules out double-tap zoom)
   for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, e => e.preventDefault(), { passive: false });
-  // (app.css also sets touch-action so only scrolling is allowed, which rules out double-tap zoom too)
   document.addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 
   document.addEventListener('click', e => {
     const t = e.target;
     if (twisted) { e.preventDefault(); return; }
-    const vb = t.closest('#seg [data-view]');
+    const vb = t.closest('.bar [data-view]');
     if (vb) { go(S.cursor, vb.dataset.view); return; }
     const kb = t.closest('#edKind [data-kind]');
     if (kb) { ED.kind = kb.dataset.kind; syncEditor(); return; }
@@ -592,6 +557,7 @@
       else if (act === 'add') openEditor();
       else if (act === 'menu') openAccount();
       else if (act === 'dial-now') { S.dial = 0; paintDial(); }
+      else if (act === 'to-cal') $('#bar').scrollIntoView({ behavior: 'smooth' });
       else if (act === 'close') closeEditor();
       else if (act === 'delete') deleteEditor();
       else if (act === 'signout') { closeEditor(); if (sb) sb.auth.signOut(); }
@@ -601,12 +567,11 @@
     if (ev && t.closest('#view')) { const r = byId(ev.dataset.id); if (r) openEditor(r); return; }
     const g = t.closest('[data-go]');
     if (g) { go(g.dataset.go, g.dataset.viewTo || null); return; }
-    // clicking an empty stretch of a flow/week row starts an event at that time
-    const fl = t.closest('.flow');
-    if (fl && fl.dataset.day && !t.closest('.fl-ev, .chip')) {
-      const box = fl.getBoundingClientRect(), a0 = +fl.dataset.a, b0 = +fl.dataset.b;
-      const m = Math.round((a0 + ((e.clientX - box.left) / box.width) * (b0 - a0)) / 30) * 30;
-      S.cursor = fl.dataset.day;
+    // clicking an empty spot in the hour grid starts an event at that time
+    const col = t.closest('.tg-col');
+    if (col) {
+      const m = Math.floor(((e.clientY - col.getBoundingClientRect().top) / HOUR) * 2) * 30;
+      S.cursor = col.dataset.day;
       openEditor(null, { start: Math.max(0, Math.min(23 * 60, m)) });
     }
   });
@@ -631,9 +596,9 @@
     else if (k === 't') go(today()); else if (k === 'n') openEditor();
     else if ({ d: 'day', w: 'week', m: 'month', y: 'year' }[k]) go(S.cursor, { d: 'day', w: 'week', m: 'month', y: 'year' }[k]);
   });
-  // swipe left/right to move through days, weeks, months
+  // swipe left/right on the calendar to move through days, weeks, months
   let sx0 = null, sy0 = null;
-  $('#view').addEventListener('touchstart', e => { if (e.target.closest('.wk-scroll, .clock, .flow-wrap')) { sx0 = null; return; } sx0 = e.touches[0].clientX; sy0 = e.touches[0].clientY; }, { passive: true });
+  $('#view').addEventListener('touchstart', e => { if (!e.target.closest('#cal')) { sx0 = null; return; } sx0 = e.touches[0].clientX; sy0 = e.touches[0].clientY; }, { passive: true });
   $('#view').addEventListener('touchend', e => {
     if (sx0 == null || !S.user) return;
     const dx = e.changedTouches[0].clientX - sx0, dy = e.changedTouches[0].clientY - sy0;
@@ -649,6 +614,7 @@
       const u = session ? session.user : null, was = S.user && S.user.id;
       S.user = u; S.ready = true;
       if (u && was !== u.id) start();
+      if (!u) $('#view').innerHTML = '';
       render();
     });
     document.addEventListener('visibilitychange', () => { if (!document.hidden && S.user) { checkVersion(); load(); } });
