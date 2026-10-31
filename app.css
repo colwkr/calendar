@@ -19,6 +19,7 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 Inter, system-ui, -apple-system, Segoe UI, sans-serif; -webkit-font-smoothing: antialiased; }
+html { touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; } /* scrolling only: no pinch or double-tap zoom */
 body { min-height: 100dvh; -webkit-tap-highlight-color: transparent; }
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 svg { display: block; }
@@ -73,7 +74,15 @@ svg { display: block; }
 .day-r { display: grid; gap: 16px; }
 /* the next six hours: half a clock face pressed against the card's right edge */
 .clock-card { position: relative; padding: 16px 0 16px 16px; overflow: hidden; }
-.clock { display: block; width: min(100%, 250px); height: auto; margin-left: auto; }
+.clock { display: block; width: min(100%, 250px); height: auto; margin-left: auto; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+.clock:active { cursor: grabbing; }
+.clock-card h2 { margin-bottom: 10px; }
+.cc-back { position: absolute; top: 10px; right: 12px; height: 28px; padding: 0 12px; font-size: 12.5px; z-index: 2; }
+.cc-dial .cc-badge { top: 4px; }
+.cc-steps { display: flex; gap: 3px; margin-top: 6px; }
+.cc-steps i { width: 5px; height: 5px; border-radius: 50%; background: var(--line-2); }
+.cc-steps i.on { background: var(--accent); }
+.live .cc-steps i.on { background: var(--now); }
 .cc-dial { position: relative; }
 .cc-badge { position: absolute; top: 0; left: 0; width: 72px; height: 72px; border-radius: 50%; background: var(--panel-2); border: 1px solid var(--line-2); display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; z-index: 1; }
 .cc-badge small { font-size: 8.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 3px; }

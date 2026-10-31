@@ -160,25 +160,24 @@
     return `<svg class="mini" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" aria-hidden="true"><circle cx="${c}" cy="${c}" r="${r}" class="mini-track"/>${arcs}</svg>`;
   }
 
-  /* The next six hours as half a clock face: now at the bottom, six hours from now at the top, running up the left
-     side like the 6-to-12 half of a wall clock. One band per category; events are arcs on their band. Today the window
-     starts now and slides as time passes; on any other day it starts at that day's first event (or 8 AM). */
-  const SPAN = 360;
-  function windowStart(dayStr) {
-    if (dayStr === today()) return nowMin();
-    const first = timed(occs(dayStr))[0];
-    return first ? Math.floor(first.s / 60) * 60 : 8 * 60;
-  }
-  // timed events from this day and the next (a window late in the evening runs past midnight)
-  function windowEvents(dayStr, w0) {
-    const next = timed(occs(ymd(addDays(parse(dayStr), 1)))).map(o => ({ ...o, s: o.s + 1440, e: o.e + 1440 }));
-    return timed(occs(dayStr)).concat(next).filter(o => o.e > w0 && o.s < w0 + SPAN);
+  /* The 6-Hour Dial: the next six hours as half a clock face — now at the bottom, six hours from now at the top,
+     running up the left side like the 6-to-12 half of a wall clock. One band per category; events are arcs on their
+     band. It always starts at now, whatever day the rest of the page shows. Twist it (drag around the dial, or scroll)
+     to look ahead six hours at a time, up to 72 hours out; it settles on the nearest six-hour step when let go.
+     Minutes below are counted from the start of today. */
+  const SPAN = 360, AHEAD = 72 * 60 - SPAN;
+  S.dial = 0; // minutes twisted ahead of now
+  const dialStart = () => nowMin() + Math.round(S.dial);
+  function dialEvents(w0) {
+    const out = [];
+    for (let i = 0; i < 4; i++) out.push(...timed(occs(ymd(addDays(parse(today()), i)))).map(o => ({ ...o, s: o.s + i * 1440, e: o.e + i * 1440 })));
+    return out.filter(o => o.e > w0 && o.s < w0 + SPAN).sort((a, b) => a.s - b.s);
   }
   function sixHours(w0, evs) {
     const CX = 240, CY = 246, W = 22, R = { work: 222, meet: 196, personal: 170, travel: 144 }, FACE = 128;
     const P = (r, m) => { const a = Math.PI / 2 + ((m - w0) / SPAN) * Math.PI; return [(CX + r * Math.cos(a)).toFixed(2), (CY + r * Math.sin(a)).toFixed(2)]; };
     const half = (r, s, e, rev) => { const [x1, y1] = P(r, s), [x2, y2] = P(r, e); return rev ? `M${x2} ${y2}A${r} ${r} 0 0 0 ${x1} ${y1}` : `M${x1} ${y1}A${r} ${r} 0 0 1 ${x2} ${y2}`; };
-    let s = `<svg class="clock" viewBox="0 0 244 500" role="img" aria-label="The next six hours, ${clock(w0 % 1440)} to ${clock((w0 + SPAN) % 1440)}">`;
+    let s = `<svg class="clock" viewBox="0 0 244 500" role="img" aria-label="6-Hour Dial, ${clock(w0 % 1440)} to ${clock((w0 + SPAN) % 1440)}. Twist to look further ahead.">`;
     for (const k of CAT_KEYS) s += `<path d="${half(R[k], w0, w0 + SPAN)}" class="band" stroke-width="${W}"/>`;
     s += `<path d="${half(FACE, w0, w0 + SPAN)}L${CX} ${CY}Z" class="face"/>`;
     for (let m = Math.ceil(w0 / 15) * 15; m <= w0 + SPAN; m += 15) {
@@ -202,17 +201,39 @@
     s += `<line x1="${CX - 1}" y1="${CY + FACE}" x2="${CX - 1}" y2="${CY + 237}" class="hand"/><text x="${CX - 8}" y="${CY + 250}" class="c-now">${clock(w0 % 1440)}</text>`;
     return s + '</svg>';
   }
-  // under the dial: what's on now and what's next in the window
-  function upNext(w0, evs) {
+  // a time on the dial, with its weekday when it isn't today
+  const dialTime = (m, short) => (m >= 1440 ? fmt(addDays(parse(today()), Math.floor(m / 1440)), { weekday: 'short' }) + ' ' : '') + clock(m % 1440, short);
+  // under the dial: what's on at the start of the window and what's next in it
+  function upNext(w0, evs, live) {
     const cur = evs.find(o => o.s <= w0 && o.e > w0), nxt = evs.find(o => o.s > w0);
     const row = (k, o, when) => `<button type="button" class="up" data-id="${o.r.id}"><i style="background:var(--${o.cat})"></i><small>${k}</small><b>${esc(o.title)}</b><em>${when}</em></button>`;
     if (!cur && !nxt) return '<p class="up-none">Nothing in these six hours.</p>';
-    return (cur ? row('Now', cur, `until ${clock(cur.e % 1440)}`) : '') + (nxt ? row('Next', nxt, clock(nxt.s % 1440)) : '');
+    return (cur ? row(live ? 'Now' : 'On', cur, `until ${dialTime(cur.e)}`) : '') + (nxt ? row('Next', nxt, dialTime(nxt.s)) : '');
+  }
+  function dialCard() {
+    const w0 = dialStart(), evs = dialEvents(w0), live = S.dial === 0, step = Math.round(S.dial / SPAN);
+    const d = addDays(parse(today()), Math.floor(w0 / 1440));
+    return `<h2>6-Hour Dial</h2>
+      ${live ? '' : '<button type="button" class="pill cc-back" data-act="dial-now">Now</button>'}
+      <div class="cc-dial">
+        <div class="cc-badge"><small>${esc(fmt(d, { weekday: 'long' }))}</small><b>${d.getDate()}</b></div>
+        <div class="cc-win"><small>${live ? 'Next 6 hours' : `${step * 6} hours ahead`}</small><b>${dialTime(w0, true)} – ${dialTime(w0 + SPAN, true)}</b>
+          <span class="cc-steps" aria-hidden="true">${[...Array(12)].map((_, i) => `<i${i === step ? ' class="on"' : ''}></i>`).join('')}</span></div>
+        ${sixHours(w0, evs)}
+      </div>
+      <div class="cc-up">${upNext(w0, evs, live)}</div>
+      <div class="legend">${CAT_KEYS.map(k => `<span><i style="background:var(--${k})"></i>${CATS[k]}</span>`).join('')}</div>`;
+  }
+  // redraws just the dial (while it's being twisted, the rest of the page stays put)
+  function paintDial() {
+    const el = $('#dial'); if (!el) return;
+    el.classList.toggle('live', S.dial === 0);
+    el.innerHTML = dialCard();
   }
 
   /* ---------- views ---------- */
   function vDay() {
-    const d = parse(S.cursor), list = occs(S.cursor), tl = timed(list), allDay = list.filter(o => o.allDay), w0 = windowStart(S.cursor), wev = windowEvents(S.cursor, w0);
+    const d = parse(S.cursor), list = occs(S.cursor), tl = timed(list), allDay = list.filter(o => o.allDay);
     // seven mini rings, the chosen day in the middle
     let strip = '';
     for (let i = -3; i <= 3; i++) {
@@ -228,15 +249,7 @@
     return `
       <div class="strip">${strip}</div>
       <div class="day">
-        <section class="card clock-card${S.cursor === today() ? ' live' : ''}">
-          <div class="cc-dial">
-          <div class="cc-badge"><small>${esc(fmt(d, { weekday: 'long' }))}</small><b>${d.getDate()}</b></div>
-          <div class="cc-win"><small>${S.cursor === today() ? 'Next 6 hours' : '6 hours from'}</small><b>${clock(w0 % 1440, true)} – ${clock((w0 + SPAN) % 1440, true)}</b></div>
-          ${sixHours(w0, wev)}
-          </div>
-          <div class="cc-up">${upNext(w0, wev)}</div>
-          <div class="legend">${CAT_KEYS.map(k => `<span><i style="background:var(--${k})"></i>${CATS[k]}</span>`).join('')}</div>
-        </section>
+        <section class="card clock-card${S.dial === 0 ? ' live' : ''}" id="dial">${dialCard()}</section>
         <div class="day-r">
           <section class="card">
             <h2>Flow</h2>
@@ -519,8 +532,52 @@
 
   /* ---------- input ---------- */
   const byId = id => S.rows.find(r => String(r.id) === String(id));
+
+  /* Twisting the 6-Hour Dial: drag around its center. Turning it the way the hours run brings later hours down to
+     the bottom; half a turn of the face is six hours. Let go and it settles on the nearest six-hour step. */
+  let tw = null, twisted = false;
+  const settle = () => { S.dial = Math.max(0, Math.min(AHEAD, Math.round(S.dial / SPAN) * SPAN)); paintDial(); };
+  document.addEventListener('pointerdown', e => {
+    const svg = e.target.closest('#dial .clock');
+    if (!svg || e.button > 0) return;
+    const r = svg.getBoundingClientRect(), cx = r.left + r.width * 240 / 244, cy = r.top + r.height * 246 / 500;
+    tw = { cx, cy, a: Math.atan2(e.clientY - cy, e.clientX - cx), start: S.dial, turned: 0, x: e.clientX, y: e.clientY, moved: false };
+  });
+  window.addEventListener('pointermove', e => {
+    if (!tw) return;
+    if (!tw.moved && Math.hypot(e.clientX - tw.x, e.clientY - tw.y) < 6) return;
+    tw.moved = true;
+    const a = Math.atan2(e.clientY - tw.cy, e.clientX - tw.cx);
+    let d = a - tw.a; if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI;
+    tw.a = a; tw.turned += d;
+    S.dial = Math.max(0, Math.min(AHEAD, tw.start - (tw.turned / Math.PI) * SPAN));
+    paintDial();
+  });
+  const endTwist = () => {
+    if (!tw) return;
+    if (tw.moved) { settle(); twisted = true; setTimeout(() => { twisted = false; }, 80); }
+    tw = null;
+  };
+  window.addEventListener('pointerup', endTwist);
+  window.addEventListener('pointercancel', endTwist);
+  // a scroll wheel or trackpad over the dial turns it one step at a time
+  let wheelT = 0;
+  document.addEventListener('wheel', e => {
+    if (!e.target.closest('#dial .clock')) return;
+    e.preventDefault();
+    if (Date.now() - wheelT < 350 || Math.abs(e.deltaY) < 4) return;
+    wheelT = Date.now();
+    S.dial += e.deltaY > 0 ? SPAN : -SPAN; settle();
+  }, { passive: false });
+
+  // no pinch or double-tap zoom anywhere in the app (iOS Safari ignores the viewport tag's no-zoom, so stop the gestures)
+  for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, e => e.preventDefault(), { passive: false });
+  // (app.css also sets touch-action so only scrolling is allowed, which rules out double-tap zoom too)
+  document.addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+
   document.addEventListener('click', e => {
     const t = e.target;
+    if (twisted) { e.preventDefault(); return; }
     const vb = t.closest('#seg [data-view]');
     if (vb) { go(S.cursor, vb.dataset.view); return; }
     const kb = t.closest('#edKind [data-kind]');
@@ -534,6 +591,7 @@
       else if (act === 'today') go(today());
       else if (act === 'add') openEditor();
       else if (act === 'menu') openAccount();
+      else if (act === 'dial-now') { S.dial = 0; paintDial(); }
       else if (act === 'close') closeEditor();
       else if (act === 'delete') deleteEditor();
       else if (act === 'signout') { closeEditor(); if (sb) sb.auth.signOut(); }
@@ -575,7 +633,7 @@
   });
   // swipe left/right to move through days, weeks, months
   let sx0 = null, sy0 = null;
-  $('#view').addEventListener('touchstart', e => { if (e.target.closest('.wk-scroll')) { sx0 = null; return; } sx0 = e.touches[0].clientX; sy0 = e.touches[0].clientY; }, { passive: true });
+  $('#view').addEventListener('touchstart', e => { if (e.target.closest('.wk-scroll, .clock, .flow-wrap')) { sx0 = null; return; } sx0 = e.touches[0].clientX; sy0 = e.touches[0].clientY; }, { passive: true });
   $('#view').addEventListener('touchend', e => {
     if (sx0 == null || !S.user) return;
     const dx = e.changedTouches[0].clientX - sx0, dy = e.changedTouches[0].clientY - sy0;
