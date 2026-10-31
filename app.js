@@ -13,6 +13,7 @@
   const WEEK_START = 0; // 0 = Sunday, 1 = Monday
   const CATS = { work: 'Work', meet: 'Meet', personal: 'Personal', travel: 'Travel' };
   const CAT_KEYS = Object.keys(CATS);
+  const REPEATS = { daily: 1, weekdays: 1, weekly: 1, monthly: 1, yearly: 1 }; // how an event or status can repeat
 
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -65,7 +66,7 @@
     tab: 'dial', // the app always opens on the dial
     dial: 0, // minutes the dial is twisted ahead of now
     span: 360, // how many minutes the dial shows (the Width fader: 1 to 12 hours, 6 by default)
-    rows: [], byDay: new Map(), bdays: [], sleep: [],
+    rows: [], byDay: new Map(), bdays: [], sleep: [], rec: [],
   };
   if (!['day', 'week', 'month', 'year'].includes(S.view)) S.view = 'week';
   let MV = null; // an event lifted off the dial and being moved: { id, s, dur, grab }
@@ -86,10 +87,11 @@
   };
 
   function index(rows) {
-    S.rows = rows; S.byDay = new Map(); S.bdays = []; S.sleep = [];
+    S.rows = rows; S.byDay = new Map(); S.bdays = []; S.sleep = []; S.rec = [];
     for (const r of rows) {
       if (r.kind === 'birthday') { S.bdays.push(r); continue; }
       if (r.kind === 'sleep') { S.sleep.push(r); continue; }
+      if (REPEATS[r.repeat]) { S.rec.push(r); continue; }
       if (!S.byDay.has(r.day)) S.byDay.set(r.day, []);
       S.byDay.get(r.day).push(r);
     }
@@ -134,11 +136,34 @@
     return out;
   }
 
+  /* Repeating events and statuses: `day` is the first time it happens, `repeat` how it comes back, and data.until
+     (optional) the last day. A monthly one on the 31st falls on the last day of shorter months. */
+  function repeatsOn(r, dayStr) {
+    if (dayStr < r.day || (r.data && r.data.until && dayStr > r.data.until)) return false;
+    const d = parse(dayStr), f = parse(r.day);
+    switch (r.repeat) {
+      case 'daily': return true;
+      case 'weekdays': return d.getDay() >= 1 && d.getDay() <= 5;
+      case 'weekly': return d.getDay() === f.getDay();
+      case 'monthly': return d.getDate() === Math.min(f.getDate(), dim(d));
+      case 'yearly': return d.getMonth() === f.getMonth() && d.getDate() === Math.min(f.getDate(), dim(d));
+    }
+    return false;
+  }
+  const ordinal = n => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
+  // the choices for a given first date, worded for it: "Every week on Sunday", "Every month on the 1st"
+  function repeatChoices(dayStr) {
+    const d = dayStr ? parse(dayStr) : new Date();
+    return [['', "Doesn't repeat"], ['daily', 'Every day'], ['weekdays', 'Every weekday (Mon–Fri)'],
+      ['weekly', `Every week on ${fmt(d, { weekday: 'long' })}`], ['monthly', `Every month on the ${ordinal(d.getDate())}`],
+      ['yearly', `Every year on ${fmt(d, { month: 'long', day: 'numeric' })}`]];
+  }
+
   /* What's on a day: that day's events plus any birthday falling on it, each with start/end minutes
      (and, when asked, sleep). */
   function occs(dayStr, withSleep) {
     const out = withSleep ? sleepOn(dayStr) : [];
-    for (const r of S.byDay.get(dayStr) || []) {
+    for (const r of (S.byDay.get(dayStr) || []).concat(S.rec.filter(r => repeatsOn(r, dayStr)))) {
       const s = toMin(r.start_time);
       if (s == null) { out.push({ r, allDay: true, title: r.title, cat: r.category }); continue; }
       let e = toMin(r.end_time); if (e == null) e = s + 60; if (e <= s) e = 1440;
@@ -315,7 +340,7 @@
       for (const o of group) {
         const h = Math.max(20, ((o.e - o.s) / 60) * HOUR - 2);
         out += `<button type="button" class="tg-ev${h < 36 ? ' short' : ''}" data-id="${o.r.id}" style="top:${(o.s / 60) * HOUR}px;height:${h}px;left:calc(${(o.lane / n) * 100}% + ${2 + ind}px);width:calc(${100 / n}% - ${4 + ind}px);--c:var(--${o.cat})">
-          <b>${esc(o.title)}</b><small>${clock(o.s, true)} – ${clock(o.e, true)}${o.r.place ? ', ' + esc(o.r.place) : ''}</small></button>`;
+          <b>${esc(o.title)}</b><small>${REPEATS[o.r.repeat] ? '<span class="rep" title="Repeats">↻</span> ' : ''}${clock(o.s, true)} – ${clock(o.e, true)}${o.r.place ? ', ' + esc(o.r.place) : ''}</small></button>`;
       }
       group = [];
     };
@@ -496,7 +521,7 @@
       end_time: null,
     };
     if (!row && !r.end_time) r.end_time = toTime(Math.min(toMin(r.start_time) + 60, 1439));
-    ED = { id: row ? row.id : null, kind: r.kind, cat: r.category || 'personal', orig: row };
+    ED = { id: row ? row.id : null, kind: r.kind, cat: r.category || 'personal', orig: row, repeat: REPEATS[r.repeat] ? r.repeat : '' };
     $('#sheet').innerHTML = `<form id="edForm" novalidate>
       <div class="sh-head"><h2>${row ? 'Edit' : 'New'}</h2><button type="button" class="ic" data-act="close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       <div class="seg wide" id="edKind"><button type="button" data-kind="event">Event</button><button type="button" data-kind="block">Status</button><button type="button" data-kind="birthday">Birthday</button></div>
@@ -506,6 +531,8 @@
       <label class="f"><span id="edDayLab">Date</span><input id="ed_day" type="date" value="${esc(r.day)}" required></label>
       <label class="tog ev-only no-st"><input type="checkbox" id="ed_allday"${!r.start_time && r.kind !== 'block' ? ' checked' : ''}><span>All day</span></label>
       <div class="row2 ev-only times"><label class="f"><span>Starts</span><input id="ed_start" type="time" value="${esc((r.start_time || '09:00').slice(0, 5))}"></label><label class="f"><span>Ends</span><input id="ed_end" type="time" value="${esc((r.end_time || '10:00').slice(0, 5))}"></label></div>
+      <label class="f ev-only"><span>Repeats</span><select id="ed_repeat"></select></label>
+      <label class="f ev-only" id="edUntil" hidden><span>Until (optional, leave empty to keep repeating)</span><input id="ed_until" type="date" value="${esc((r.data && r.data.until) || '')}"></label>
       <label class="f ev-only no-st"><span>Place</span><input id="ed_place" value="${esc(r.place)}" autocomplete="off"></label>
       <label class="f"><span>Notes</span><textarea id="ed_notes" rows="2">${esc(r.notes)}</textarea></label>
       <p class="hint bd-only" id="edAge"></p>
@@ -527,6 +554,11 @@
     $('#edDayLab').textContent = bd ? 'Born on (with the year)' : 'Date';
     f.querySelector('.times').hidden = bd || $('#ed_allday').checked;
     const day = $('#ed_day').value;
+    // the repeat choices are worded for the chosen date ("Every week on Sunday")
+    const sel = $('#ed_repeat');
+    if (sel.options.length) ED.repeat = sel.value;
+    sel.innerHTML = repeatChoices(day).map(([v, t]) => `<option value="${v}"${v === ED.repeat ? ' selected' : ''}>${esc(t)}</option>`).join('');
+    $('#edUntil').hidden = bd || !ED.repeat;
     if (bd && day) {
       const b = parse(day), n = new Date(), t = new Date(n.getFullYear(), n.getMonth(), n.getDate());
       let next = new Date(t.getFullYear(), b.getMonth(), b.getDate());
@@ -546,7 +578,12 @@
       kind: ED.kind, title: $('#ed_title').value.trim(), category: bd ? 'personal' : ED.cat, day: $('#ed_day').value,
       start_time: allDay ? null : $('#ed_start').value || null, end_time: allDay ? null : $('#ed_end').value || null,
       place: bd || st ? null : $('#ed_place').value.trim() || null, notes: $('#ed_notes').value.trim() || null,
+      repeat: bd ? null : $('#ed_repeat').value || null,
     };
+    const until = row.repeat ? $('#ed_until').value || null : null, data = { ...((ED.orig && ED.orig.data) || {}) };
+    if (until) data.until = until; else delete data.until;
+    row.data = data;
+    if (until && until < row.day) { err.textContent = 'The repeat needs to end after it starts.'; err.hidden = false; return; }
     const bad = !row.title ? (bd ? 'Add their name.' : st ? 'Name the status, like Working.' : 'Add a title.') : !row.day ? 'Pick a date.'
       : (!allDay && !row.start_time) ? 'Pick a start time.'
       : (st && !row.end_time) ? 'Pick when it ends.'
@@ -674,7 +711,7 @@
         // which copy of the event is under the finger (it may repeat across the days on the dial)
         const m = minuteAt(tw.x, tw.y), o = dialEvents(dialStart()).find(o => String(o.r.id) === String(row.id) && o.s <= m + 5 && o.e >= m - 5);
         if (!o) return;
-        MV = { id: row.id, row, s: o.s, dur: o.e - o.s, grab: m - o.s };
+        MV = { id: row.id, row, s: o.s, dur: o.e - o.s, grab: m - o.s, occDay: Math.floor(o.s / 1440) };
         tw = null; paintDial();
       }, 450);
     }
@@ -698,7 +735,9 @@
   async function dropMoved() {
     const mv = MV; MV = null;
     const dayN = Math.floor(mv.s / 1440), start = ((mv.s % 1440) + 1440) % 1440, end = Math.min(start + mv.dur, 1439);
-    const patch = { day: ymd(addDays(parse(today()), dayN)), start_time: toTime(start), end_time: toTime(end) };
+    // a repeating event moves as a whole series: same new time every time, shifted by the same number of days
+    const day = REPEATS[mv.row.repeat] ? ymd(addDays(parse(mv.row.day), dayN - mv.occDay)) : ymd(addDays(parse(today()), dayN));
+    const patch = { day, start_time: toTime(start), end_time: toTime(end) };
     const before = { day: mv.row.day, start_time: mv.row.start_time, end_time: mv.row.end_time };
     if (patch.day === before.day && patch.start_time === (before.start_time || '').slice(0, 5)) { paintDial(); return; }
     Object.assign(mv.row, patch); index(S.rows); paintDial(); // show it in its new place right away

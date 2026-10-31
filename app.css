@@ -236,6 +236,9 @@ html.tab-dial .app { padding-bottom: 0; }
 /* ---------- forms ---------- */
 .f { display: grid; gap: 6px; }
 .f > span { font-size: 12px; color: var(--muted); font-weight: 500; }
+select { width: 100%; min-height: 44px; font: inherit; font-size: 16px; color: var(--text); background: #111215; border: 1px solid var(--line-2); border-radius: 10px; padding: 0 12px; outline: none; color-scheme: dark; }
+select:focus { border-color: var(--accent); }
+.rep { font-weight: 700; }
 input, textarea { width: 100%; font: inherit; font-size: 16px; color: var(--text); background: #111215; border: 1px solid var(--line-2); border-radius: 10px; padding: 10px 12px; outline: none; }
 input:focus, textarea:focus { border-color: var(--accent); }
 textarea { resize: vertical; min-height: 44px; }
