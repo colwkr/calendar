@@ -92,7 +92,7 @@ svg { display: block; }
 .live .clock .hand { stroke: var(--now); }
 .live .clock .c-now { fill: var(--now); }
 .cc-up { display: grid; gap: 2px; margin: 12px max(16px, env(safe-area-inset-right)) 10px -6px; }
-.up { display: grid; grid-template-columns: 8px 40px 1fr auto; align-items: center; gap: 8px; padding: 8px 6px; border-radius: 9px; text-align: left; }
+.up { display: grid; grid-template-columns: 8px 48px 1fr auto; align-items: center; gap: 8px; padding: 8px 6px; border-radius: 9px; text-align: left; }
 .up:hover { background: var(--panel-2); }
 .up i { width: 8px; height: 8px; border-radius: 50%; }
 .up small { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
@@ -109,7 +109,21 @@ html.tab-dial .app { padding-bottom: 0; }
 .hero-in { min-height: 0; justify-content: flex-start; }
 .hero .cc-dial { flex: 1 1 auto; min-height: 240px; }
 .hero .clock { position: absolute; top: 0; right: 0; height: 100%; max-width: none; -webkit-touch-callout: none; }
-.cc-up { flex: none; max-height: 132px; overflow: hidden; }
+/* always the same height (room for Status, Now and Next) so rows coming and going never move or resize the dial */
+.cc-up { flex: none; height: 116px; overflow: hidden; align-content: start; }
+.cc-up .up { height: 36px; padding-top: 0; padding-bottom: 0; }
+.up b span { font-weight: 500; color: var(--muted); }
+.up-status small { color: var(--text); }
+.cc-tip { height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clock .band-status { stroke: #19191d; }
+.clock .ev-arc.status { stroke-linecap: butt; opacity: .55; }
+.clock .ev-lab.status { font-size: 8px; font-weight: 700; letter-spacing: .1em; }
+.tg-block { position: absolute; left: 0; right: 0; z-index: 0; text-align: left; padding: 3px 0 0 5px; border-left: 3px solid var(--c); background: color-mix(in srgb, var(--c) 9%, transparent); display: flex; flex-direction: column; align-items: flex-start; overflow: hidden; line-height: 1.2; }
+.tg-block span { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: color-mix(in srgb, var(--c) 70%, #fff); }
+.tg-block small { font-size: 9.5px; color: var(--muted); white-space: nowrap; }
+#edForm .st-only { display: none; margin: -4px 0 0; }
+#edForm.is-st .st-only { display: block; }
+#edForm.is-st .no-st { display: none; }
 .clock .hr.min { font-size: 13px; font-weight: 600; fill: var(--muted); }
 .clock .band-sleep { stroke: #17171f; }
 .clock .ev-lab.sleep { fill: #d9d4ff; }

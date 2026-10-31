@@ -1,7 +1,9 @@
 /* Calendar — events live in Nerve (Supabase table public.cal_events), so other apps can read and add to them.
    The page opens on the 6-Hour Dial (the next six hours, twistable up to 72 hours ahead). Below it is a regular
    calendar: Day and Week as an hour-by-hour grid, Month, and Year.
-   Birthdays are events with kind 'birthday': `day` is the date they were born, and they repeat every year. */
+   Birthdays are events with kind 'birthday': `day` is the date they were born, and they repeat every year.
+   A status (kind 'block', e.g. "Working" 6 AM–12:30 PM) says what you're doing overall, not where or on what; the
+   events inside its hours say that. It gets the dial's outer ring and a shaded stretch behind events in the grid. */
 (() => {
   'use strict';
 
@@ -115,7 +117,8 @@
   /* Sleep: a schedule, not events. Each sleep row is a bedtime and wake-up for a set of nights ('nightly',
      'weeknights' = nights starting Sun–Thu, 'weekends' = nights starting Fri and Sat). A night that starts on one day
      shows on that day from bedtime to midnight and on the next from midnight to wake-up. */
-  const nightOn = (r, d) => r.repeat === 'weeknights' ? d.getDay() <= 4 : r.repeat === 'weekends' ? d.getDay() >= 5 : true;
+  // 'once' is a single night, the one starting on the row's day
+  const nightOn = (r, d) => r.repeat === 'once' ? r.day === ymd(d) : r.repeat === 'weeknights' ? d.getDay() <= 4 : r.repeat === 'weekends' ? d.getDay() >= 5 : true;
   function sleepOn(dayStr) {
     const out = [], d = parse(dayStr), prev = addDays(d, -1);
     for (const r of S.sleep) {
@@ -139,7 +142,7 @@
       const s = toMin(r.start_time);
       if (s == null) { out.push({ r, allDay: true, title: r.title, cat: r.category }); continue; }
       let e = toMin(r.end_time); if (e == null) e = s + 60; if (e <= s) e = 1440;
-      out.push({ r, s, e, title: r.title, cat: r.category });
+      out.push({ r, s, e, title: r.title, cat: r.category, block: r.kind === 'block' });
     }
     if (S.bdays.length) {
       const [y, m, d] = dayStr.split('-').map(Number);
@@ -208,11 +211,12 @@
     return !mm ? `${h} hour${h === 1 ? '' : 's'}` : (h ? `${h}h ${mm}m` : `${mm}m`);
   }
   function sixHours(w0, evs) {
-    const SPAN = S.span, CX = 240, CY = 246, W = 22, R = { work: 222, meet: 196, personal: 170, travel: 144, sleep: 118 }, FACE = 102;
+    // the thin outer ring holds statuses ("Working"); inside it, one band per category
+    const SPAN = S.span, CX = 240, CY = 246, W = 20, SW = 12, R = { status: 231, work: 212, meet: 189, personal: 166, travel: 143, sleep: 120 }, FACE = 104;
     const P = (r, m) => { const a = Math.PI / 2 + ((m - w0) / SPAN) * Math.PI; return [(CX + r * Math.cos(a)).toFixed(2), (CY + r * Math.sin(a)).toFixed(2)]; };
     const half = (r, s, e, rev) => { const [x1, y1] = P(r, s), [x2, y2] = P(r, e); return rev ? `M${x2} ${y2}A${r} ${r} 0 0 0 ${x1} ${y1}` : `M${x1} ${y1}A${r} ${r} 0 0 1 ${x2} ${y2}`; };
     let s = `<svg class="clock" viewBox="0 0 244 500" role="img" aria-label="6-Hour Dial, ${dialTime(w0)} to ${dialTime(w0 + SPAN)}. Twist to look further ahead.">`;
-    for (const k of Object.keys(R)) s += `<path d="${half(R[k], w0, w0 + SPAN)}" class="band${k === 'sleep' ? ' band-sleep' : ''}" stroke-width="${W}"/>`;
+    for (const k of Object.keys(R)) s += `<path d="${half(R[k], w0, w0 + SPAN)}" class="band${k === 'sleep' ? ' band-sleep' : k === 'status' ? ' band-status' : ''}" stroke-width="${k === 'status' ? SW : W}"/>`;
     s += `<path d="${half(FACE, w0, w0 + SPAN)}L${CX} ${CY}Z" class="face"/>`;
     // finer ticks and labels when the window is short, sparser when it's long
     const tick = SPAN <= 120 ? 5 : SPAN <= 480 ? 15 : 30, label = SPAN <= 120 ? 15 : SPAN <= 480 ? 60 : 120;
@@ -226,16 +230,19 @@
     }
     let i = 0, top = '';
     for (const o of evs) {
-      const k = o.sleep ? 'sleep' : CATS[o.cat] ? o.cat : 'personal', a = Math.max(o.s, w0), b = Math.min(Math.max(o.e, o.s + 10), w0 + SPAN);
+      const color = o.sleep ? 'sleep' : CATS[o.cat] ? o.cat : 'personal', k = o.block ? 'status' : color;
+      const a = Math.max(o.s, w0), b = Math.min(Math.max(o.e, o.s + 10), w0 + SPAN);
       if (b <= a) continue;
-      // a lifted event rides just outside its band, drawn last so it sits over everything
-      const r = o.lifted ? R[k] + 10 : R[k], len = ((b - a) / SPAN) * Math.PI * r, id = `ev${i++}`;
-      const tag = o.sleep ? 'data-sleep="1"' : `data-id="${o.r.id}"`;
-      let piece = `<path d="${half(r, a, b)}" class="ev-arc${o.sleep ? ' sleep' : ''}${o.lifted ? ' lifted' : ''}" stroke-width="${o.lifted ? W + 4 : W - 2}" style="stroke:var(--${k})" ${tag}><title>${esc(o.title)} · ${dialTime(o.s)}–${dialTime(o.e)}</title></path>`;
+      // a lifted event rides just outside its band, drawn last so it sits over everything (a status has no room outside, so it just glows)
+      const r = o.lifted && !o.block ? R[k] + 10 : R[k], len = ((b - a) / SPAN) * Math.PI * r, id = `ev${i++}`;
+      const tag = o.sleep ? 'data-sleep="1"' : `data-id="${o.r.id}"`, sw = o.block ? SW : o.lifted ? W + 4 : W - 2;
+      // events say where they are too: "Running camera 5 · SVL"
+      const text = o.block ? o.title.toUpperCase() : o.r && o.r.place && !o.sleep ? `${o.title} · ${o.r.place}` : o.title;
+      let piece = `<path d="${half(r, a, b)}" class="ev-arc${o.sleep ? ' sleep' : ''}${o.block ? ' status' : ''}${o.lifted ? ' lifted' : ''}" stroke-width="${sw}" style="stroke:var(--${color})" ${tag}><title>${esc(text)} · ${dialTime(o.s)}–${dialTime(o.e)}</title></path>`;
       if (len > 34) {
-        const max = Math.floor((len - 14) / 6.2), t = o.title.length > max ? o.title.slice(0, Math.max(1, max - 1)) + '…' : o.title;
+        const cw = o.block ? 6.4 : 6.2, max = Math.floor((len - 14) / cw), t = text.length > max ? text.slice(0, Math.max(1, max - 1)) + '…' : text;
         // near the bottom the arc runs right to left, so the label is drawn the other way to stay upright
-        piece += `<path id="${id}" d="${half(r, a, b, (a + b) / 2 - w0 < SPAN / 3)}" fill="none"/><text class="ev-lab${o.sleep ? ' sleep' : ''}" dy="4"><textPath href="#${id}" startOffset="9">${esc(t)}</textPath></text>`;
+        piece += `<path id="${id}" d="${half(r, a, b, (a + b) / 2 - w0 < SPAN / 3)}" fill="none"/><text class="ev-lab${o.sleep ? ' sleep' : ''}${o.block ? ' status' : ''}" dy="${o.block ? 3 : 4}"><textPath href="#${id}" startOffset="9">${esc(t)}</textPath></text>`;
       }
       if (o.lifted) top += piece; else s += piece;
     }
@@ -245,10 +252,14 @@
     return s + '</svg>';
   }
   function upNext(w0, evs, live) {
-    const cur = evs.find(o => o.s <= w0 && o.e > w0), nxt = evs.find(o => o.s > w0);
-    const row = (k, o, when) => `<button type="button" class="up" ${o.sleep ? 'data-sleep="1"' : `data-id="${o.r.id}"`}><i style="background:var(--${o.cat})"></i><small>${k}</small><b>${esc(o.title)}</b><em>${when}</em></button>`;
-    if (!cur && !nxt) return `<p class="up-none">Nothing in these ${esc(spanText(S.span).replace(/^1 hour$/, 'hour'))}.</p>`;
-    return (cur ? row(live ? 'Now' : 'On', cur, `until ${dialTime(cur.e)}`) : '') + (nxt ? row('Next', nxt, dialTime(nxt.s)) : '');
+    // the status you're in (or the next one) sits on top; below it, the event you're at and the one after
+    const st = evs.filter(o => o.block), ev = evs.filter(o => !o.block);
+    const stNow = st.find(o => o.s <= w0 && o.e > w0) || st.find(o => o.s > w0);
+    const cur = ev.find(o => o.s <= w0 && o.e > w0), nxt = ev.find(o => o.s > w0);
+    const row = (k, o, when) => `<button type="button" class="up${o.block ? ' up-status' : ''}" ${o.sleep ? 'data-sleep="1"' : `data-id="${o.r.id}"`}><i style="background:var(--${o.cat})"></i><small>${k}</small><b>${esc(o.title)}${!o.block && o.r && o.r.place && !o.sleep ? `<span> · ${esc(o.r.place)}</span>` : ''}</b><em>${when}</em></button>`;
+    if (!cur && !nxt && !stNow) return `<p class="up-none">Nothing in these ${esc(spanText(S.span).replace(/^1 hour$/, 'hour'))}.</p>`;
+    const stRow = stNow ? row('Status', stNow, stNow.s <= w0 ? `until ${dialTime(stNow.e)}` : `from ${dialTime(stNow.s)}`) : '';
+    return stRow + (cur ? row(live ? 'Now' : 'On', cur, `until ${dialTime(cur.e)}`) : '') + (nxt ? row('Next', nxt, dialTime(nxt.s)) : '');
   }
   function ahead(m) {
     const h = Math.floor(m / 60), mm = Math.round(m % 60);
@@ -295,15 +306,15 @@
 
   /* ---------- the calendar: day and week as an hour grid ---------- */
   const HOUR = 48;
-  function placeEvents(tl) {
-    // overlapping events share the column side by side
-    const items = tl.map(o => ({ ...o })).sort((a, b) => a.s - b.s || b.e - a.e);
+  function placeEvents(tl, indent) {
+    // overlapping events share the column side by side; inside a status they sit indented so its stripe shows
+    const items = tl.map(o => ({ ...o })).sort((a, b) => a.s - b.s || b.e - a.e), ind = indent || 0;
     let group = [], end = -1, out = '';
     const flush = () => {
       const n = lanes(group);
       for (const o of group) {
         const h = Math.max(20, ((o.e - o.s) / 60) * HOUR - 2);
-        out += `<button type="button" class="tg-ev${h < 36 ? ' short' : ''}" data-id="${o.r.id}" style="top:${(o.s / 60) * HOUR}px;height:${h}px;left:calc(${(o.lane / n) * 100}% + 2px);width:calc(${100 / n}% - 4px);--c:var(--${o.cat})">
+        out += `<button type="button" class="tg-ev${h < 36 ? ' short' : ''}" data-id="${o.r.id}" style="top:${(o.s / 60) * HOUR}px;height:${h}px;left:calc(${(o.lane / n) * 100}% + ${2 + ind}px);width:calc(${100 / n}% - ${4 + ind}px);--c:var(--${o.cat})">
           <b>${esc(o.title)}</b><small>${clock(o.s, true)} – ${clock(o.e, true)}${o.r.place ? ', ' + esc(o.r.place) : ''}</small></button>`;
       }
       group = [];
@@ -328,7 +339,11 @@
       const now = keys[i] === t ? `<span class="tg-now" style="top:${(nowMin() / 60) * HOUR}px"></span>` : '';
       // sleep sits behind the events as a shaded stretch
       const zz = sleepOn(keys[i]).map(o => `<button type="button" class="tg-sleep" data-sleep="1" style="top:${(o.s / 60) * HOUR}px;height:${((o.e - o.s) / 60) * HOUR}px"><span>Sleep</span></button>`).join('');
-      return `<div class="tg-col${keys[i] === t ? ' today' : ''}" data-day="${keys[i]}">${zz}${placeEvents(timed(l))}${now}</div>`;
+      // a status ("Working") is a shaded stretch with its name, the events inside it on top
+      const bl = timed(l).filter(o => o.block), evs = timed(l).filter(o => !o.block);
+      const bz = bl.map(o => `<button type="button" class="tg-block" data-id="${o.r.id}" style="top:${(o.s / 60) * HOUR}px;height:${((o.e - o.s) / 60) * HOUR}px;--c:var(--${CATS[o.cat] ? o.cat : 'personal'})"><span>${esc(o.title)}</span><small>${clock(o.s, true)} – ${clock(o.e, true)}</small></button>`).join('');
+      const inner = evs.filter(o => bl.some(b => o.s < b.e && o.e > b.s)), outer = evs.filter(o => !inner.includes(o));
+      return `<div class="tg-col${keys[i] === t ? ' today' : ''}" data-day="${keys[i]}">${zz}${bz}${placeEvents(outer)}${placeEvents(inner, multi ? 5 : 10)}${now}</div>`;
     }).join('');
     return `<section class="card tg" style="--n:${days.length}">${head}${all}
       <div class="tg-scroll"><div class="tg-row tg-body" style="height:${24 * HOUR}px"><div class="tg-gut tg-hours">${gutter}</div>${cols}</div></div></section>`;
@@ -484,13 +499,14 @@
     ED = { id: row ? row.id : null, kind: r.kind, cat: r.category || 'personal', orig: row };
     $('#sheet').innerHTML = `<form id="edForm" novalidate>
       <div class="sh-head"><h2>${row ? 'Edit' : 'New'}</h2><button type="button" class="ic" data-act="close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
-      <div class="seg wide" id="edKind"><button type="button" data-kind="event">Event</button><button type="button" data-kind="birthday">Birthday</button></div>
+      <div class="seg wide" id="edKind"><button type="button" data-kind="event">Event</button><button type="button" data-kind="block">Status</button><button type="button" data-kind="birthday">Birthday</button></div>
+      <p class="muted small st-only">What you're doing overall, like Working. Add the events inside it to say where you are and what you're on.</p>
       <label class="f"><span id="edTitleLab">Title</span><input id="ed_title" value="${esc(r.title)}" autocomplete="off" required></label>
       <div class="f ev-only"><span>Type</span><div class="cats" id="edCats">${CAT_KEYS.map(k => `<button type="button" data-cat="${k}" style="--c:var(--${k})">${CATS[k]}</button>`).join('')}</div></div>
       <label class="f"><span id="edDayLab">Date</span><input id="ed_day" type="date" value="${esc(r.day)}" required></label>
-      <label class="tog ev-only"><input type="checkbox" id="ed_allday"${!r.start_time ? ' checked' : ''}><span>All day</span></label>
+      <label class="tog ev-only no-st"><input type="checkbox" id="ed_allday"${!r.start_time && r.kind !== 'block' ? ' checked' : ''}><span>All day</span></label>
       <div class="row2 ev-only times"><label class="f"><span>Starts</span><input id="ed_start" type="time" value="${esc((r.start_time || '09:00').slice(0, 5))}"></label><label class="f"><span>Ends</span><input id="ed_end" type="time" value="${esc((r.end_time || '10:00').slice(0, 5))}"></label></div>
-      <label class="f ev-only"><span>Place</span><input id="ed_place" value="${esc(r.place)}" autocomplete="off"></label>
+      <label class="f ev-only no-st"><span>Place</span><input id="ed_place" value="${esc(r.place)}" autocomplete="off"></label>
       <label class="f"><span>Notes</span><textarea id="ed_notes" rows="2">${esc(r.notes)}</textarea></label>
       <p class="hint bd-only" id="edAge"></p>
       <p class="err" id="ed_err" hidden></p>
@@ -502,11 +518,12 @@
   }
   function syncEditor() {
     const f = $('#edForm'); if (!f) return;
-    const bd = ED.kind === 'birthday';
-    f.classList.toggle('is-bd', bd);
+    const bd = ED.kind === 'birthday', st = ED.kind === 'block';
+    f.classList.toggle('is-bd', bd); f.classList.toggle('is-st', st);
+    if (st) $('#ed_allday').checked = false;
     f.querySelectorAll('#edKind button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.kind === ED.kind)));
     f.querySelectorAll('#edCats button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.cat === ED.cat)));
-    $('#edTitleLab').textContent = bd ? 'Name' : 'Title';
+    $('#edTitleLab').textContent = bd ? 'Name' : st ? 'Status (like Working)' : 'Title';
     $('#edDayLab').textContent = bd ? 'Born on (with the year)' : 'Date';
     f.querySelector('.times').hidden = bd || $('#ed_allday').checked;
     const day = $('#ed_day').value;
@@ -524,14 +541,15 @@
     ED = null;
   }
   async function saveEditor() {
-    const err = $('#ed_err'), bd = ED.kind === 'birthday', allDay = bd || $('#ed_allday').checked;
+    const err = $('#ed_err'), bd = ED.kind === 'birthday', st = ED.kind === 'block', allDay = bd || (!st && $('#ed_allday').checked);
     const row = {
       kind: ED.kind, title: $('#ed_title').value.trim(), category: bd ? 'personal' : ED.cat, day: $('#ed_day').value,
       start_time: allDay ? null : $('#ed_start').value || null, end_time: allDay ? null : $('#ed_end').value || null,
-      place: bd ? null : $('#ed_place').value.trim() || null, notes: $('#ed_notes').value.trim() || null,
+      place: bd || st ? null : $('#ed_place').value.trim() || null, notes: $('#ed_notes').value.trim() || null,
     };
-    const bad = !row.title ? (bd ? 'Add their name.' : 'Add a title.') : !row.day ? 'Pick a date.'
+    const bad = !row.title ? (bd ? 'Add their name.' : st ? 'Name the status, like Working.' : 'Add a title.') : !row.day ? 'Pick a date.'
       : (!allDay && !row.start_time) ? 'Pick a start time.'
+      : (st && !row.end_time) ? 'Pick when it ends.'
       : (!allDay && row.end_time && toMin(row.end_time) <= toMin(row.start_time)) ? 'The end time needs to be after the start.' : '';
     if (bad) { err.textContent = bad; err.hidden = false; return; }
     const btn = $('#edForm [type=submit]'); btn.disabled = true;
@@ -541,7 +559,7 @@
       closeEditor();
       if (wasNew && !bd) S.cursor = day;
       await load();
-      toast(wasNew ? (bd ? 'Birthday added' : 'Event added') : 'Saved');
+      toast(wasNew ? (bd ? 'Birthday added' : st ? 'Status added' : 'Event added') : 'Saved');
     } catch (e) {
       btn.disabled = false; err.textContent = 'Could not save to Nerve. Try again.'; err.hidden = false;
     }
@@ -558,7 +576,8 @@
 
   /* ---------- sleep schedule ---------- */
   function openSleep() {
-    const every = S.sleep.find(r => r.repeat !== 'weekends') || null, wk = S.sleep.find(r => r.repeat === 'weekends') || null;
+    const sched = S.sleep.filter(r => r.repeat !== 'once'); // single nights aren't part of the schedule
+    const every = sched.find(r => r.repeat !== 'weekends') || null, wk = sched.find(r => r.repeat === 'weekends') || null;
     const t = (r, k, d) => esc(((r && r[k]) || d).slice(0, 5));
     ED = null;
     $('#sheet').innerHTML = `<form id="sleepForm" novalidate>
@@ -570,13 +589,13 @@
       <div class="row2" id="slWk"${wk ? '' : ' hidden'}><label class="f"><span>Weekend bedtime</span><input id="sl_bed2" type="time" value="${t(wk, 'start_time', '00:00')}"></label>
         <label class="f"><span>Wake up</span><input id="sl_wake2" type="time" value="${t(wk, 'end_time', '09:00')}"></label></div>
       <p class="err" id="sl_err" hidden></p>
-      <div class="sh-foot">${S.sleep.length ? '<button type="button" class="pill danger" data-act="sleep-off">Turn off</button>' : '<span></span>'}<button type="submit" class="pill solid">Save</button></div>
+      <div class="sh-foot">${sched.length ? '<button type="button" class="pill danger" data-act="sleep-off">Turn off</button>' : '<span></span>'}<button type="submit" class="pill solid">Save</button></div>
     </form>`;
     $('#scrim').hidden = false; $('#sheet').hidden = false;
     requestAnimationFrame(() => $('#sheet').classList.add('in'));
   }
   async function replaceSleep(rows) {
-    for (const r of S.sleep) await db.remove(r.id);
+    for (const r of S.sleep) if (r.repeat !== 'once') await db.remove(r.id);
     for (const r of rows) await db.insert({ kind: 'sleep', title: 'Sleep', category: 'sleep', day: today(), ...r });
   }
   async function saveSleep(off) {
