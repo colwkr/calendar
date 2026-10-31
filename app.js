@@ -160,44 +160,59 @@
     return `<svg class="mini" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" aria-hidden="true"><circle cx="${c}" cy="${c}" r="${r}" class="mini-track"/>${arcs}</svg>`;
   }
 
-  // The day as a 24-hour clock: midnight at the top, one band per category, events as arcs on their band.
-  function dayClock(dayStr, list) {
-    const C = 210, W = 22, R = { work: 188, meet: 162, personal: 136, travel: 110 };
-    const d = parse(dayStr), isToday = dayStr === today();
-    let s = `<svg class="clock" viewBox="0 0 420 420" role="img" aria-label="${esc(fmt(d, { weekday: 'long', month: 'long', day: 'numeric' }))} as a 24-hour clock">`;
-    for (const k of CAT_KEYS) {
-      s += `<circle cx="${C}" cy="${C}" r="${R[k]}" class="band" stroke-width="${W}"/>`;
-      s += `<path id="bl-${k}" d="${arc(C, R[k], 30, 170, true)}" fill="none"/><text class="band-lab" dy="3.5"><textPath href="#bl-${k}">${CATS[k].toUpperCase()}</textPath></text>`;
-    }
-    s += `<circle cx="${C}" cy="${C}" r="96" class="face"/>`;
-    for (let h = 0; h < 24; h++) {
-      const [x1, y1] = pt(C, 96, h * 60), [x2, y2] = pt(C, h % 3 ? 91 : 87, h * 60);
-      s += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="tick${h % 3 ? '' : ' major'}"/>`;
-      if (h % 3 === 0) { const [x, y] = pt(C, 76, h * 60); s += `<text x="${x}" y="${y}" class="hr" dy="4">${hourLabel(h)}</text>`; }
+  /* The next six hours as half a clock face: now at the bottom, six hours from now at the top, running up the left
+     side like the 6-to-12 half of a wall clock. One band per category; events are arcs on their band. Today the window
+     starts now and slides as time passes; on any other day it starts at that day's first event (or 8 AM). */
+  const SPAN = 360;
+  function windowStart(dayStr) {
+    if (dayStr === today()) return nowMin();
+    const first = timed(occs(dayStr))[0];
+    return first ? Math.floor(first.s / 60) * 60 : 8 * 60;
+  }
+  // timed events from this day and the next (a window late in the evening runs past midnight)
+  function windowEvents(dayStr, w0) {
+    const next = timed(occs(ymd(addDays(parse(dayStr), 1)))).map(o => ({ ...o, s: o.s + 1440, e: o.e + 1440 }));
+    return timed(occs(dayStr)).concat(next).filter(o => o.e > w0 && o.s < w0 + SPAN);
+  }
+  function sixHours(w0, evs) {
+    const CX = 240, CY = 246, W = 22, R = { work: 222, meet: 196, personal: 170, travel: 144 }, FACE = 128;
+    const P = (r, m) => { const a = Math.PI / 2 + ((m - w0) / SPAN) * Math.PI; return [(CX + r * Math.cos(a)).toFixed(2), (CY + r * Math.sin(a)).toFixed(2)]; };
+    const half = (r, s, e, rev) => { const [x1, y1] = P(r, s), [x2, y2] = P(r, e); return rev ? `M${x2} ${y2}A${r} ${r} 0 0 0 ${x1} ${y1}` : `M${x1} ${y1}A${r} ${r} 0 0 1 ${x2} ${y2}`; };
+    let s = `<svg class="clock" viewBox="0 0 244 500" role="img" aria-label="The next six hours, ${clock(w0 % 1440)} to ${clock((w0 + SPAN) % 1440)}">`;
+    for (const k of CAT_KEYS) s += `<path d="${half(R[k], w0, w0 + SPAN)}" class="band" stroke-width="${W}"/>`;
+    s += `<path d="${half(FACE, w0, w0 + SPAN)}L${CX} ${CY}Z" class="face"/>`;
+    for (let m = Math.ceil(w0 / 15) * 15; m <= w0 + SPAN; m += 15) {
+      const hour = m % 60 === 0, [x1, y1] = P(FACE, m), [x2, y2] = P(FACE - (hour ? 12 : 6), m);
+      s += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="tick${hour ? ' major' : ''}"/>`;
+      if (hour) { const [x, y] = P(FACE - 30, m), h = (m / 60) % 24; s += `<text x="${x}" y="${y}" class="hr" dy="7">${h % 12 || 12}</text>`; }
     }
     let i = 0;
-    for (const o of timed(list)) {
-      const k = CATS[o.cat] ? o.cat : 'personal', r = R[k], e = Math.max(o.e, o.s + 10), mid = (o.s + e) / 2, flip = mid < 360 || mid > 1080; // bottom half: run the label the other way so it reads upright
-      const len = (e - o.s) / 1440 * 2 * Math.PI * r, id = `ev${i++}`;
-      s += `<path d="${arc(C, r, o.s, e)}" class="ev-arc" stroke-width="${W - 2}" style="stroke:var(--${k})" data-id="${o.r.id}"><title>${esc(o.title)} · ${clock(o.s)}–${clock(o.e)}</title></path>`;
+    for (const o of evs) {
+      const k = CATS[o.cat] ? o.cat : 'personal', r = R[k], a = Math.max(o.s, w0), b = Math.min(Math.max(o.e, o.s + 10), w0 + SPAN);
+      if (b <= a) continue;
+      const len = ((b - a) / SPAN) * Math.PI * r, id = `ev${i++}`;
+      s += `<path d="${half(r, a, b)}" class="ev-arc" stroke-width="${W - 2}" style="stroke:var(--${k})" data-id="${o.r.id}"><title>${esc(o.title)} · ${clock(o.s % 1440)}–${clock(o.e % 1440)}</title></path>`;
       if (len > 34) {
         const max = Math.floor((len - 14) / 6.2), t = o.title.length > max ? o.title.slice(0, Math.max(1, max - 1)) + '…' : o.title;
-        s += `<path id="${id}" d="${arc(C, r, o.s, e, flip)}" fill="none"/><text class="ev-lab" dy="4" data-id="${o.r.id}"><textPath href="#${id}" startOffset="9">${esc(t)}</textPath></text>`;
+        // near the bottom the arc runs right to left, so the label is drawn the other way to stay upright
+        s += `<path id="${id}" d="${half(r, a, b, (a + b) / 2 - w0 < 120)}" fill="none"/><text class="ev-lab" dy="4" data-id="${o.r.id}"><textPath href="#${id}" startOffset="9">${esc(t)}</textPath></text>`;
       }
     }
-    s += `<text x="${C}" y="${C - 22}" class="c-wd">${esc(fmt(d, { weekday: 'short' }).toUpperCase())}</text>`;
-    s += `<text x="${C}" y="${C + 18}" class="c-day">${d.getDate()}</text>`;
-    s += `<text x="${C}" y="${C + 40}" class="c-mo">${esc(fmt(d, { month: 'short' }).toUpperCase())}</text>`;
-    if (isToday) {
-      const n = nowMin(), [x, y] = pt(C, 204, n), [lx, ly] = pt(C, 98, n);
-      s += `<line x1="${lx}" y1="${ly}" x2="${x}" y2="${y}" class="hand"/><circle cx="${x}" cy="${y}" r="4" class="hand-dot"/>`;
-    }
+    // now: a red mark at the bottom where the window begins
+    s += `<line x1="${CX - 1}" y1="${CY + FACE}" x2="${CX - 1}" y2="${CY + 237}" class="hand"/><text x="${CX - 8}" y="${CY + 250}" class="c-now">${clock(w0 % 1440)}</text>`;
     return s + '</svg>';
+  }
+  // under the dial: what's on now and what's next in the window
+  function upNext(w0, evs) {
+    const cur = evs.find(o => o.s <= w0 && o.e > w0), nxt = evs.find(o => o.s > w0);
+    const row = (k, o, when) => `<button type="button" class="up" data-id="${o.r.id}"><i style="background:var(--${o.cat})"></i><small>${k}</small><b>${esc(o.title)}</b><em>${when}</em></button>`;
+    if (!cur && !nxt) return '<p class="up-none">Nothing in these six hours.</p>';
+    return (cur ? row('Now', cur, `until ${clock(cur.e % 1440)}`) : '') + (nxt ? row('Next', nxt, clock(nxt.s % 1440)) : '');
   }
 
   /* ---------- views ---------- */
   function vDay() {
-    const d = parse(S.cursor), list = occs(S.cursor), tl = timed(list), allDay = list.filter(o => o.allDay);
+    const d = parse(S.cursor), list = occs(S.cursor), tl = timed(list), allDay = list.filter(o => o.allDay), w0 = windowStart(S.cursor), wev = windowEvents(S.cursor, w0);
     // seven mini rings, the chosen day in the middle
     let strip = '';
     for (let i = -3; i <= 3; i++) {
@@ -213,8 +228,13 @@
     return `
       <div class="strip">${strip}</div>
       <div class="day">
-        <section class="card clock-card">
-          ${dayClock(S.cursor, list)}
+        <section class="card clock-card${S.cursor === today() ? ' live' : ''}">
+          <div class="cc-dial">
+          <div class="cc-badge"><small>${esc(fmt(d, { weekday: 'long' }))}</small><b>${d.getDate()}</b></div>
+          <div class="cc-win"><small>${S.cursor === today() ? 'Next 6 hours' : '6 hours from'}</small><b>${clock(w0 % 1440, true)} – ${clock((w0 + SPAN) % 1440, true)}</b></div>
+          ${sixHours(w0, wev)}
+          </div>
+          <div class="cc-up">${upNext(w0, wev)}</div>
           <div class="legend">${CAT_KEYS.map(k => `<span><i style="background:var(--${k})"></i>${CATS[k]}</span>`).join('')}</div>
         </section>
         <div class="day-r">

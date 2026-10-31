@@ -68,25 +68,44 @@ svg { display: block; }
 .mini-track { fill: none; stroke: var(--line-2); stroke-width: 3; }
 .mini path { fill: none; stroke-width: 3; stroke-linecap: round; }
 
-.day { display: grid; grid-template-columns: minmax(300px, 440px) 1fr; gap: 16px; align-items: start; }
+.day { display: grid; grid-template-columns: minmax(300px, 360px) 1fr; gap: 16px; align-items: start; }
 .day > *, .day-r > * { min-width: 0; }
 .day-r { display: grid; gap: 16px; }
-.clock-card { padding: 20px; }
-.clock { width: 100%; height: auto; }
+/* the next six hours: half a clock face pressed against the card's right edge */
+.clock-card { position: relative; padding: 16px 0 16px 16px; overflow: hidden; }
+.clock { display: block; width: min(100%, 250px); height: auto; margin-left: auto; }
+.cc-dial { position: relative; }
+.cc-badge { position: absolute; top: 0; left: 0; width: 72px; height: 72px; border-radius: 50%; background: var(--panel-2); border: 1px solid var(--line-2); display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; z-index: 1; }
+.cc-badge small { font-size: 8.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 3px; }
+.cc-badge b { font-size: 28px; font-weight: 700; letter-spacing: -.03em; }
+.live .cc-badge small { color: var(--now); }
+.cc-win { position: absolute; left: 0; bottom: 0; display: flex; flex-direction: column; line-height: 1.25; z-index: 1; }
+.cc-win small { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.cc-win b { font-size: 14px; font-weight: 600; }
 .clock .band { fill: none; stroke: #1c1d21; }
-.clock .band-lab { fill: var(--dim); font-size: 8.5px; font-weight: 600; letter-spacing: .14em; }
 .clock .face { fill: #141518; stroke: var(--line); }
 .clock .tick { stroke: var(--line-2); stroke-width: 1; }
 .clock .tick.major { stroke: var(--muted); stroke-width: 1.5; }
-.clock .hr { fill: var(--muted); font-size: 11px; font-weight: 600; text-anchor: middle; }
+.clock .hr { fill: var(--text); font-size: 20px; font-weight: 700; text-anchor: middle; }
 .clock .ev-arc { fill: none; stroke-linecap: round; cursor: pointer; transition: opacity .15s; }
 .clock .ev-arc:hover { opacity: .85; }
 .clock .ev-lab { fill: #fff; font-size: 11px; font-weight: 600; pointer-events: none; }
-.clock .c-wd { fill: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .12em; text-anchor: middle; }
-.clock .c-day { fill: var(--text); font-size: 42px; font-weight: 700; text-anchor: middle; letter-spacing: -.03em; }
-.clock .c-mo { fill: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-anchor: middle; }
-.clock .hand { stroke: var(--now); stroke-width: 2; stroke-linecap: round; }
-.clock .hand-dot { fill: var(--now); }
+.clock .c-k { fill: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-anchor: end; }
+.clock .c-t { fill: var(--text); font-size: 13px; font-weight: 600; text-anchor: end; }
+.clock .c-s { fill: var(--muted); font-size: 11px; text-anchor: end; }
+.clock .hand { stroke: var(--dim); stroke-width: 2; stroke-linecap: round; }
+.clock .c-now { fill: var(--muted); font-size: 13px; font-weight: 700; text-anchor: end; }
+.live .clock .hand { stroke: var(--now); }
+.live .clock .c-now { fill: var(--now); }
+.clock-card .legend { padding-right: 16px; }
+.cc-up { display: grid; gap: 2px; margin: 10px 16px 0 -4px; }
+.up { display: grid; grid-template-columns: 8px 40px 1fr auto; align-items: center; gap: 8px; padding: 8px 6px; border-radius: 9px; text-align: left; }
+.up:hover { background: var(--panel-2); }
+.up i { width: 8px; height: 8px; border-radius: 50%; }
+.up small { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.up b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.up em { font-style: normal; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.up-none { margin: 4px 4px 0; color: var(--muted); font-size: 13px; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center; margin-top: 14px; color: var(--muted); font-size: 12px; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend i, .chip i, .mc-ev i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
