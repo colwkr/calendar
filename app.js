@@ -140,6 +140,7 @@
      (optional) the last day. A monthly one on the 31st falls on the last day of shorter months. */
   function repeatsOn(r, dayStr) {
     if (dayStr < r.day || (r.data && r.data.until && dayStr > r.data.until)) return false;
+    if (r.data && Array.isArray(r.data.skip) && r.data.skip.includes(dayStr)) return false; // that one was moved or deleted
     const d = parse(dayStr), f = parse(r.day);
     switch (r.repeat) {
       case 'daily': return true;
@@ -150,6 +151,8 @@
     }
     return false;
   }
+  // what a shown event points back to: its row, and which day's occurrence it is
+  const idAttr = o => `data-id="${o.r.id}" data-occ="${o.day || ''}"`;
   const ordinal = n => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
   // the choices for a given first date, worded for it: "Every week on Sunday", "Every month on the 1st"
   function repeatChoices(dayStr) {
@@ -169,6 +172,7 @@
       let e = toMin(r.end_time); if (e == null) e = s + 60; if (e <= s) e = 1440;
       out.push({ r, s, e, title: r.title, cat: r.category, block: r.kind === 'block' });
     }
+    for (const o of out) o.day = dayStr; // which occurrence this is, for repeating events
     if (S.bdays.length) {
       const [y, m, d] = dayStr.split('-').map(Number);
       for (const r of S.bdays) {
@@ -260,7 +264,7 @@
       if (b <= a) continue;
       // a lifted event rides just outside its band, drawn last so it sits over everything (a status has no room outside, so it just glows)
       const r = o.lifted && !o.block ? R[k] + 10 : R[k], len = ((b - a) / SPAN) * Math.PI * r, id = `ev${i++}`;
-      const tag = o.sleep ? 'data-sleep="1"' : `data-id="${o.r.id}"`, sw = o.block ? SW : o.lifted ? W + 4 : W - 2;
+      const tag = o.sleep ? 'data-sleep="1"' : `${idAttr(o)}`, sw = o.block ? SW : o.lifted ? W + 4 : W - 2;
       // events say where they are too: "Running camera 5 · SVL"
       const text = o.block ? o.title.toUpperCase() : o.r && o.r.place && !o.sleep ? `${o.title} · ${o.r.place}` : o.title;
       let piece = `<path d="${half(r, a, b)}" class="ev-arc${o.sleep ? ' sleep' : ''}${o.block ? ' status' : ''}${o.lifted ? ' lifted' : ''}" stroke-width="${sw}" style="stroke:var(--${color})" ${tag}><title>${esc(text)} · ${dialTime(o.s)}–${dialTime(o.e)}</title></path>`;
@@ -281,7 +285,7 @@
     const st = evs.filter(o => o.block), ev = evs.filter(o => !o.block);
     const stNow = st.find(o => o.s <= w0 && o.e > w0) || st.find(o => o.s > w0);
     const cur = ev.find(o => o.s <= w0 && o.e > w0), nxt = ev.find(o => o.s > w0);
-    const row = (k, o, when) => `<button type="button" class="up${o.block ? ' up-status' : ''}" ${o.sleep ? 'data-sleep="1"' : `data-id="${o.r.id}"`}><i style="background:var(--${o.cat})"></i><small>${k}</small><b>${esc(o.title)}${!o.block && o.r && o.r.place && !o.sleep ? `<span> · ${esc(o.r.place)}</span>` : ''}</b><em>${when}</em></button>`;
+    const row = (k, o, when) => `<button type="button" class="up${o.block ? ' up-status' : ''}" ${o.sleep ? 'data-sleep="1"' : `${idAttr(o)}`}><i style="background:var(--${o.cat})"></i><small>${k}</small><b>${esc(o.title)}${!o.block && o.r && o.r.place && !o.sleep ? `<span> · ${esc(o.r.place)}</span>` : ''}</b><em>${when}</em></button>`;
     if (!cur && !nxt && !stNow) return `<p class="up-none">Nothing in these ${esc(spanText(S.span).replace(/^1 hour$/, 'hour'))}.</p>`;
     const stRow = stNow ? row('Status', stNow, stNow.s <= w0 ? `until ${dialTime(stNow.e)}` : `from ${dialTime(stNow.s)}`) : '';
     return stRow + (cur ? row(live ? 'Now' : 'On', cur, `until ${dialTime(cur.e)}`) : '') + (nxt ? row('Next', nxt, dialTime(nxt.s)) : '');
@@ -339,7 +343,7 @@
       const n = lanes(group);
       for (const o of group) {
         const h = Math.max(20, ((o.e - o.s) / 60) * HOUR - 2);
-        out += `<button type="button" class="tg-ev${h < 36 ? ' short' : ''}" data-id="${o.r.id}" style="top:${(o.s / 60) * HOUR}px;height:${h}px;left:calc(${(o.lane / n) * 100}% + ${2 + ind}px);width:calc(${100 / n}% - ${4 + ind}px);--c:var(--${o.cat})">
+        out += `<button type="button" class="tg-ev${h < 36 ? ' short' : ''}" ${idAttr(o)} style="top:${(o.s / 60) * HOUR}px;height:${h}px;left:calc(${(o.lane / n) * 100}% + ${2 + ind}px);width:calc(${100 / n}% - ${4 + ind}px);--c:var(--${o.cat})">
           <b>${esc(o.title)}</b><small>${REPEATS[o.r.repeat] ? '<span class="rep" title="Repeats">↻</span> ' : ''}${clock(o.s, true)} – ${clock(o.e, true)}${o.r.place ? ', ' + esc(o.r.place) : ''}</small></button>`;
       }
       group = [];
@@ -353,7 +357,7 @@
   }
   function timeGrid(days) {
     const keys = days.map(ymd), lists = keys.map(k => occs(k)), t = today(), multi = days.length > 1;
-    const chip = o => `<button type="button" class="chip sm" data-id="${o.r.id}"><i style="background:var(--${o.cat})"></i>${esc(o.title)}</button>`;
+    const chip = o => `<button type="button" class="chip sm" ${idAttr(o)}><i style="background:var(--${o.cat})"></i>${esc(o.title)}</button>`;
     const head = `<div class="tg-row tg-head"><span class="tg-gut"></span>${days.map((d, i) => `
       <button type="button" class="tg-dh${keys[i] === t ? ' today' : ''}" data-go="${keys[i]}"${multi ? ' data-view-to="day"' : ''}><small>${esc(fmt(d, { weekday: 'short' }))}</small><b>${d.getDate()}</b></button>`).join('')}</div>`;
     const anyAll = lists.some(l => l.some(o => o.allDay));
@@ -366,7 +370,7 @@
       const zz = sleepOn(keys[i]).map(o => `<button type="button" class="tg-sleep" data-sleep="1" style="top:${(o.s / 60) * HOUR}px;height:${((o.e - o.s) / 60) * HOUR}px"><span>Sleep</span></button>`).join('');
       // a status ("Working") is a shaded stretch with its name, the events inside it on top
       const bl = timed(l).filter(o => o.block), evs = timed(l).filter(o => !o.block);
-      const bz = bl.map(o => `<button type="button" class="tg-block" data-id="${o.r.id}" style="top:${(o.s / 60) * HOUR}px;height:${((o.e - o.s) / 60) * HOUR}px;--c:var(--${CATS[o.cat] ? o.cat : 'personal'})"><span>${esc(o.title)}</span><small>${clock(o.s, true)} – ${clock(o.e, true)}</small></button>`).join('');
+      const bz = bl.map(o => `<button type="button" class="tg-block" ${idAttr(o)} style="top:${(o.s / 60) * HOUR}px;height:${((o.e - o.s) / 60) * HOUR}px;--c:var(--${CATS[o.cat] ? o.cat : 'personal'})"><span>${esc(o.title)}</span><small>${clock(o.s, true)} – ${clock(o.e, true)}</small></button>`).join('');
       const inner = evs.filter(o => bl.some(b => o.s < b.e && o.e > b.s)), outer = evs.filter(o => !inner.includes(o));
       return `<div class="tg-col${keys[i] === t ? ' today' : ''}" data-day="${keys[i]}">${zz}${bz}${placeEvents(outer)}${placeEvents(inner, multi ? 5 : 10)}${now}</div>`;
     }).join('');
@@ -385,7 +389,7 @@
     let cells = '';
     for (let i = 0; i < weeks * 7; i++) {
       const dd = addDays(g0, i), k = ymd(dd), list = occs(k), out = dd.getMonth() !== d.getMonth();
-      const shown = list.slice(0, 3).map(o => `<button type="button" class="mc-ev" data-id="${o.r.id}"><i style="background:var(--${o.cat})"></i>${o.allDay ? '' : `<em>${clock(o.s, true)}</em>`}${esc(o.title)}</button>`).join('');
+      const shown = list.slice(0, 3).map(o => `<button type="button" class="mc-ev" ${idAttr(o)}><i style="background:var(--${o.cat})"></i>${o.allDay ? '' : `<em>${clock(o.s, true)}</em>`}${esc(o.title)}</button>`).join('');
       cells += `<div class="mc${out ? ' out' : ''}${k === today() ? ' today' : ''}" data-go="${k}" data-view-to="day">
         <div class="mc-top"><span class="mc-n">${dd.getDate()}</span>${timed(list).length ? miniRing(k, 22) : ''}</div>
         <div class="mc-evs">${shown}${list.length > 3 ? `<span class="mc-more">+${list.length - 3} more</span>` : ''}</div>
@@ -514,21 +518,22 @@
   const sheetOpen = () => !$('#sheet').hidden;
   const editing = () => { const a = document.activeElement; return !!(a && a.closest('#sheet') && a.matches('input, textarea')); };
   let ED = null;
-  function openEditor(row, preset) {
+  // occ: for a repeating event, the day of the occurrence that was tapped (the form shows that date)
+  function openEditor(row, preset, occ) {
     const r = row || {
       kind: 'event', title: '', category: 'personal', day: S.cursor, place: '', notes: '',
       start_time: toTime(preset?.start ?? (S.cursor === today() ? Math.min(23 * 60, Math.ceil((nowMin() + 1) / 60) * 60) : 9 * 60)),
       end_time: null,
     };
     if (!row && !r.end_time) r.end_time = toTime(Math.min(toMin(r.start_time) + 60, 1439));
-    ED = { id: row ? row.id : null, kind: r.kind, cat: r.category || 'personal', orig: row, repeat: REPEATS[r.repeat] ? r.repeat : '' };
+    ED = { id: row ? row.id : null, kind: r.kind, cat: r.category || 'personal', orig: row, repeat: REPEATS[r.repeat] ? r.repeat : '', occ: row && REPEATS[row.repeat] ? occ || row.day : null };
     $('#sheet').innerHTML = `<form id="edForm" novalidate>
       <div class="sh-head"><h2>${row ? 'Edit' : 'New'}</h2><button type="button" class="ic" data-act="close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
       <div class="seg wide" id="edKind"><button type="button" data-kind="event">Event</button><button type="button" data-kind="block">Status</button><button type="button" data-kind="birthday">Birthday</button></div>
       <p class="muted small st-only">What you're doing overall, like Working. Add the events inside it to say where you are and what you're on.</p>
       <label class="f"><span id="edTitleLab">Title</span><input id="ed_title" value="${esc(r.title)}" autocomplete="off" required></label>
       <div class="f ev-only"><span>Type</span><div class="cats" id="edCats">${CAT_KEYS.map(k => `<button type="button" data-cat="${k}" style="--c:var(--${k})">${CATS[k]}</button>`).join('')}</div></div>
-      <label class="f"><span id="edDayLab">Date</span><input id="ed_day" type="date" value="${esc(r.day)}" required></label>
+      <label class="f"><span id="edDayLab">Date</span><input id="ed_day" type="date" value="${esc(ED.occ || r.day)}" required></label>
       <label class="tog ev-only no-st"><input type="checkbox" id="ed_allday"${!r.start_time && r.kind !== 'block' ? ' checked' : ''}><span>All day</span></label>
       <div class="row2 ev-only times"><label class="f"><span>Starts</span><input id="ed_start" type="time" value="${esc((r.start_time || '09:00').slice(0, 5))}"></label><label class="f"><span>Ends</span><input id="ed_end" type="time" value="${esc((r.end_time || '10:00').slice(0, 5))}"></label></div>
       <label class="f ev-only"><span>Repeats</span><select id="ed_repeat"></select></label>
@@ -589,7 +594,19 @@
       : (st && !row.end_time) ? 'Pick when it ends.'
       : (!allDay && row.end_time && toMin(row.end_time) <= toMin(row.start_time)) ? 'The end time needs to be after the start.' : '';
     if (bad) { err.textContent = bad; err.hidden = false; return; }
-    const btn = $('#edForm [type=submit]'); btn.disabled = true;
+    const btn = $('#edForm [type=submit]');
+    if (ED.id && isRep(ED.orig)) {
+      const scope = await askScope('Change');
+      if (!scope) return;
+      btn.disabled = true;
+      try {
+        const undo = await changeSeries(ED.orig, ED.occ, row, scope);
+        closeEditor(); await load();
+        toast(scope === 'all' ? 'Saved for all of them' : scope === 'one' ? 'Saved for this one' : 'Saved for this one and after', async () => { await undo(); load(); });
+      } catch (e) { btn.disabled = false; err.textContent = 'Could not save to Nerve. Try again.'; err.hidden = false; }
+      return;
+    }
+    btn.disabled = true;
     try {
       if (ED.id) await db.update(ED.id, row); else await db.insert(row);
       const wasNew = !ED.id, day = row.day;
@@ -603,12 +620,75 @@
   }
   async function deleteEditor() {
     const orig = ED.orig; if (!orig) return;
+    if (isRep(orig)) {
+      const occ = ED.occ, scope = await askScope('Delete');
+      if (!scope) return;
+      closeEditor();
+      try {
+        const undo = await deleteSeries(orig, occ, scope); await load();
+        toast(scope === 'all' ? `Deleted every “${orig.title}”` : scope === 'one' ? `Deleted “${orig.title}” on ${fmt(parse(occ), { month: 'short', day: 'numeric' })}` : `Deleted “${orig.title}” from ${fmt(parse(occ), { month: 'short', day: 'numeric' })} on`, async () => { await undo(); load(); });
+      } catch (e) { toast('Could not delete. Try again.'); load(); }
+      return;
+    }
     closeEditor();
     try {
       await db.remove(orig.id); await load();
-      const { id, user_id, created_at, updated_at, ...back } = orig;
-      toast(`Deleted “${orig.title}”`, async () => { await db.insert(back); load(); });
+      toast(`Deleted “${orig.title}”`, async () => { await db.insert(fields(orig)); load(); });
     } catch (e) { toast('Could not delete. Try again.'); }
+  }
+
+  /* ---------- changing a repeating event ----------
+     Changing, moving or deleting one occurrence asks how far it reaches: only that one, that one and every one after
+     it, or all of them. Only that one: the series skips that day (data.skip) and, for a change, a one-off copy takes
+     its place. That one and after: the series ends the day before (data.until) and, for a change, a new series starts
+     there. Each returns an undo. */
+  const isRep = r => !!(r && REPEATS[r.repeat]);
+  const fields = r => { const { id, user_id, created_at, updated_at, ...f } = r; return f; };
+  const dayDiff = (a, b) => Math.round((parse(a) - parse(b)) / 864e5);
+  function askScope(what) {
+    return new Promise(res => {
+      const el = document.createElement('div');
+      el.className = 'ask-wrap';
+      el.innerHTML = `<div class="ask" role="dialog" aria-modal="true" aria-label="${esc(what)} a repeating event">
+        <h3>${esc(what)} a repeating event</h3>
+        <button type="button" class="pill big" data-scope="one">Only this one</button>
+        <button type="button" class="pill big" data-scope="following">This one and all after it</button>
+        <button type="button" class="pill big" data-scope="all">All of them</button>
+        <button type="button" class="pill big ghost" data-scope="">Cancel</button></div>`;
+      document.body.appendChild(el);
+      el.addEventListener('click', e => {
+        const b = e.target.closest('[data-scope]');
+        if (!b && e.target !== el) return;
+        e.stopPropagation(); el.remove(); res(b ? b.dataset.scope || null : null);
+      });
+    });
+  }
+  // next: the occurrence's new values (its day is that occurrence's new date)
+  async function changeSeries(series, occ, next, scope) {
+    const before = fields(series), data = series.data || {}, added = [];
+    if (scope === 'following' && occ <= series.day) scope = 'all';
+    if (scope === 'all') {
+      // moving one occurrence by some days moves the whole series by the same
+      const day = next.repeat ? ymd(addDays(parse(series.day), dayDiff(next.day, occ))) : next.day;
+      await db.update(series.id, { ...next, day });
+    } else if (scope === 'one') {
+      await db.update(series.id, { data: { ...data, skip: [...(data.skip || []), occ] } });
+      added.push(await db.insert({ ...next, repeat: null, data: {} }));
+    } else {
+      await db.update(series.id, { data: { ...data, until: ymd(addDays(parse(occ), -1)) } });
+      const nd = { ...(next.data || {}) }, skip = (data.skip || []).filter(s => s >= occ);
+      if (skip.length) nd.skip = skip; else delete nd.skip;
+      added.push(await db.insert({ ...next, data: nd }));
+    }
+    return async () => { for (const a of added) if (a && a.id) await db.remove(a.id); await db.update(series.id, before); };
+  }
+  async function deleteSeries(series, occ, scope) {
+    const before = fields(series), data = series.data || {};
+    if (scope === 'following' && occ <= series.day) scope = 'all';
+    if (scope === 'all') { await db.remove(series.id); return async () => { await db.insert(before); }; }
+    if (scope === 'one') await db.update(series.id, { data: { ...data, skip: [...(data.skip || []), occ] } });
+    else await db.update(series.id, { data: { ...data, until: ymd(addDays(parse(occ), -1)) } });
+    return async () => { await db.update(series.id, { data: before.data || {} }); };
   }
 
   /* ---------- sleep schedule ---------- */
@@ -735,9 +815,20 @@
   async function dropMoved() {
     const mv = MV; MV = null;
     const dayN = Math.floor(mv.s / 1440), start = ((mv.s % 1440) + 1440) % 1440, end = Math.min(start + mv.dur, 1439);
-    // a repeating event moves as a whole series: same new time every time, shifted by the same number of days
-    const day = REPEATS[mv.row.repeat] ? ymd(addDays(parse(mv.row.day), dayN - mv.occDay)) : ymd(addDays(parse(today()), dayN));
-    const patch = { day, start_time: toTime(start), end_time: toTime(end) };
+    const day = ymd(addDays(parse(today()), dayN)), patch = { day, start_time: toTime(start), end_time: toTime(end) };
+    // a repeating event asks whether the move is for only this one, this one and after, or all of them
+    if (isRep(mv.row)) {
+      const occ = ymd(addDays(parse(today()), mv.occDay));
+      paintDial();
+      if (occ === day && patch.start_time === (mv.row.start_time || '').slice(0, 5)) return;
+      const scope = await askScope('Move');
+      if (!scope) return;
+      try {
+        const undo = await changeSeries(mv.row, occ, { ...fields(mv.row), ...patch }, scope); await load();
+        toast(`Moved to ${dialTime(mv.s, true)}${scope === 'all' ? ', all of them' : scope === 'following' ? ', this and after' : ''}`, async () => { await undo(); load(); });
+      } catch (e) { toast('Could not move it. Try again.'); load(); }
+      return;
+    }
     const before = { day: mv.row.day, start_time: mv.row.start_time, end_time: mv.row.end_time };
     if (patch.day === before.day && patch.start_time === (before.start_time || '').slice(0, 5)) { paintDial(); return; }
     Object.assign(mv.row, patch); index(S.rows); paintDial(); // show it in its new place right away
@@ -811,7 +902,7 @@
       return;
     }
     const ev = t.closest('[data-id]');
-    if (ev && t.closest('#view')) { const r = byId(ev.dataset.id); if (r) openEditor(r); return; }
+    if (ev && t.closest('#view')) { const r = byId(ev.dataset.id); if (r) openEditor(r, null, ev.dataset.occ); return; }
     const g = t.closest('[data-go]');
     if (g) { go(g.dataset.go, g.dataset.viewTo || null); return; }
     // clicking an empty spot in the hour grid starts an event at that time
@@ -840,6 +931,7 @@
     if (error) { err.textContent = 'That email and password did not work.'; err.hidden = false; }
   });
   document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && $('.ask-wrap')) { $('.ask-wrap [data-scope=""]').click(); return; }
     if (e.key === 'Escape' && sheetOpen()) { closeEditor(); return; }
     if (sheetOpen() || !S.user || e.metaKey || e.ctrlKey || e.altKey || (e.target.matches && e.target.matches('input, textarea, select'))) return;
     const k = e.key.toLowerCase();

@@ -266,6 +266,12 @@ input[type="date"], input[type="time"] { color-scheme: dark; min-height: 44px; }
 .sh-foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; }
 .sh-foot .solid { min-width: 110px; }
 
+/* "Only this one / this one and after / all" for repeating events, above everything */
+.ask-wrap { position: fixed; inset: 0; z-index: 40; background: rgba(0,0,0,.6); display: flex; align-items: flex-end; justify-content: center; padding: 16px 16px calc(var(--sab) + 16px); }
+.ask { width: min(400px, 100%); background: var(--panel); border: 1px solid var(--line-2); border-radius: 18px; padding: 18px; display: grid; gap: 8px; box-shadow: 0 30px 80px rgba(0,0,0,.6); }
+.ask h3 { margin: 0 0 6px; font-size: 16px; font-weight: 600; text-align: center; }
+.pill.ghost { background: none; border-color: transparent; color: var(--muted); }
+@media (min-width: 681px) { .ask-wrap { align-items: center; } }
 .toast { position: fixed; z-index: 30; left: 50%; bottom: calc(var(--sab) + 150px); transform: translateX(-50%); background: var(--text); color: #111; border-radius: 12px; padding: 10px 14px; display: flex; align-items: center; gap: 14px; font-weight: 500; box-shadow: 0 10px 30px rgba(0,0,0,.4); max-width: calc(100vw - 32px); }
 .toast button { font-weight: 700; color: #5b3fd6; }
 
