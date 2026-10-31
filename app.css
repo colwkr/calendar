@@ -14,6 +14,7 @@
   --personal: #3ecf8e;
   --travel: #ffb547;
   --bday: #ff7ab6;
+  --sleep: #8b80ff;
   --r: 14px;
   /* the phone's clock area and home bar (stood in for by the test frame, which has no real ones) */
   --sat: env(safe-area-inset-top, 0px);
@@ -39,7 +40,7 @@ svg { display: block; }
 
 .ic { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); flex: none; }
 .ic:hover { background: var(--panel-2); }
-.ic svg, .pill svg, .fab svg, .hero-more svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ic svg, .pill svg, .fab svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .pill { height: 36px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-weight: 500; white-space: nowrap; text-decoration: none; }
 .pill:hover { background: var(--panel-2); }
 .pill.sm { height: 30px; padding: 0 12px; font-size: 13px; }
@@ -99,8 +100,41 @@ svg { display: block; }
 .up em { font-style: normal; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .up-none { margin: 4px 6px 0; color: var(--muted); font-size: 13px; }
 .hero-in .legend { padding-right: max(16px, env(safe-area-inset-right)); }
-.hero-more { align-self: center; display: flex; flex-direction: column; align-items: center; gap: 0; color: var(--dim); font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; padding: 10px 20px calc(var(--sab) + 6px); margin-right: max(16px, env(safe-area-inset-right)); }
-.hero-more:hover { color: var(--muted); }
+.cc-tip { margin: 8px max(16px, env(safe-area-inset-right)) 0 0; text-align: center; color: var(--dim); font-size: 11.5px; }
+
+/* the Dial tab is one screen that never scrolls: the dial takes whatever height is left over */
+html.tab-dial, html.tab-dial body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+html.tab-dial .app { padding-bottom: 0; }
+.hero { height: 100dvh; min-height: 0; padding-bottom: calc(var(--sab) + 66px); overflow: hidden; }
+.hero-in { min-height: 0; justify-content: flex-start; }
+.hero .cc-dial { flex: 1 1 auto; min-height: 240px; }
+.hero .clock { position: absolute; top: 0; right: 0; height: 100%; max-width: none; -webkit-touch-callout: none; }
+.cc-up { flex: none; max-height: 132px; overflow: hidden; }
+.clock .hr.min { font-size: 13px; font-weight: 600; fill: var(--muted); }
+.clock .band-sleep { stroke: #17171f; }
+.clock .ev-lab.sleep { fill: #d9d4ff; }
+.clock .ev-arc.lifted { filter: drop-shadow(0 6px 10px rgba(0,0,0,.7)) drop-shadow(0 0 6px color-mix(in srgb, currentColor 40%, transparent)); cursor: grabbing; }
+.cc-win.moving small { color: var(--accent); }
+
+/* the Width fader, left of the dial: 12 hours at the top, 1 hour at the bottom, smooth (no notches) */
+.fader { position: absolute; z-index: 2; left: 18px; top: 96px; bottom: 74px; width: 44px; display: flex; flex-direction: column; align-items: center; gap: 6px; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; cursor: ns-resize; outline: none; }
+.fd-end { font-size: 10px; font-weight: 600; color: var(--dim); }
+.fd-track { position: relative; flex: 1; width: 6px; border-radius: 3px; background: var(--line-2); }
+.fd-fill { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 3px; background: var(--accent); }
+.fd-thumb { position: absolute; left: 50%; transform: translate(-50%, 50%); min-width: 40px; height: 26px; padding: 0 6px; border-radius: 13px; background: var(--text); color: #111; font-size: 12px; font-weight: 700; display: grid; place-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.5); white-space: nowrap; }
+.fader:focus-visible .fd-thumb { box-shadow: 0 0 0 3px var(--accent); }
+.fd-name { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+
+/* bottom tabs */
+.tabs { position: fixed; z-index: 11; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; gap: 8px; padding: 8px 16px calc(var(--sab) + 8px); background: color-mix(in srgb, var(--bg) 92%, transparent); border-top: 1px solid var(--line); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.tabs button { flex: 1; max-width: 180px; height: 44px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--dim); font-size: 11px; font-weight: 600; }
+.tabs button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tabs button[aria-selected="true"] { color: var(--text); background: var(--panel); }
+
+/* sleep shading in the day and week grids */
+.tg-sleep { position: absolute; left: 0; right: 0; z-index: 0; background: repeating-linear-gradient(135deg, rgba(139,128,255,.10) 0 6px, rgba(139,128,255,.05) 6px 12px); border-radius: 0; text-align: left; padding: 3px 5px; overflow: hidden; }
+.tg-sleep span { font-size: 10px; font-weight: 600; color: #a69cff; text-transform: uppercase; letter-spacing: .06em; }
+.tg-ev { z-index: 1; }
 
 /* ---------- the calendar below ---------- */
 .bar { position: sticky; top: 0; z-index: 5; background: var(--bg); display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: calc(var(--sat) + 10px) 0 12px; margin-top: 8px; }
@@ -120,7 +154,7 @@ svg { display: block; }
 .tg-all { border-bottom: 1px solid var(--line); }
 .tg-all .tg-gut { display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; }
 .tg-allc { display: flex; flex-direction: column; gap: 2px; padding: 4px 2px; min-width: 0; border-left: 1px solid var(--line); }
-.tg-scroll { max-height: calc(100dvh - var(--sat) - 190px); overflow-y: auto; overscroll-behavior: contain; }
+.tg-scroll { max-height: calc(100dvh - var(--sat) - var(--sab) - 250px); overflow-y: auto; overscroll-behavior: contain; }
 .tg-body { position: relative; }
 .tg-hours { position: relative; }
 .tg-hours span { position: absolute; right: 7px; transform: translateY(-50%); font-size: 10.5px; color: var(--dim); white-space: nowrap; }
@@ -173,7 +207,7 @@ svg { display: block; }
 .yd.today { background: var(--now); color: #fff; font-weight: 700; }
 
 /* new event */
-.fab { position: fixed; z-index: 10; right: max(18px, env(safe-area-inset-right)); bottom: calc(var(--sab) + 18px); width: 56px; height: 56px; border-radius: 18px; background: var(--text); color: #111; display: grid; place-items: center; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+.fab { position: fixed; z-index: 10; right: max(18px, env(safe-area-inset-right)); bottom: calc(var(--sab) + 80px); width: 56px; height: 56px; border-radius: 18px; background: var(--text); color: #111; display: grid; place-items: center; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
 .fab svg { width: 24px; height: 24px; stroke-width: 2.2; }
 .fab:hover { background: #fff; }
 
@@ -215,7 +249,7 @@ input[type="date"], input[type="time"] { color-scheme: dark; min-height: 44px; }
 .sh-foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 4px; }
 .sh-foot .solid { min-width: 110px; }
 
-.toast { position: fixed; z-index: 30; left: 50%; bottom: calc(var(--sab) + 90px); transform: translateX(-50%); background: var(--text); color: #111; border-radius: 12px; padding: 10px 14px; display: flex; align-items: center; gap: 14px; font-weight: 500; box-shadow: 0 10px 30px rgba(0,0,0,.4); max-width: calc(100vw - 32px); }
+.toast { position: fixed; z-index: 30; left: 50%; bottom: calc(var(--sab) + 150px); transform: translateX(-50%); background: var(--text); color: #111; border-radius: 12px; padding: 10px 14px; display: flex; align-items: center; gap: 14px; font-weight: 500; box-shadow: 0 10px 30px rgba(0,0,0,.4); max-width: calc(100vw - 32px); }
 .toast button { font-weight: 700; color: #5b3fd6; }
 
 /* ---------- smaller screens ---------- */
