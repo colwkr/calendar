@@ -335,7 +335,10 @@
   }
 
   /* ---------- the calendar: day and week as an hour grid ---------- */
-  const HOUR = 48;
+  // pixels per hour in the day and week grids; pinching changes it (and it's remembered)
+  let HOUR = Math.max(12, Math.min(240, Number(store.get('hour', 48)) || 48));
+  // a time of day as a distance down the grid; it follows --hour, so zooming only changes that one value
+  const at = m => `calc(${(m / 60).toFixed(4)} * var(--hour))`;
   function placeEvents(tl, indent) {
     // overlapping events share the column side by side; inside a status they sit indented so its stripe shows
     const items = tl.map(o => ({ ...o })).sort((a, b) => a.s - b.s || b.e - a.e), ind = indent || 0;
@@ -344,7 +347,7 @@
       const n = lanes(group);
       for (const o of group) {
         const h = Math.max(20, ((o.e - o.s) / 60) * HOUR - 2);
-        out += `<button type="button" class="tg-ev${h < 36 ? ' short' : ''}" ${idAttr(o)} style="top:${(o.s / 60) * HOUR}px;height:${h}px;left:calc(${(o.lane / n) * 100}% + ${2 + ind}px);width:calc(${100 / n}% - ${4 + ind}px);--c:var(--${o.cat})">
+        out += `<button type="button" class="tg-ev${h < 36 ? ' short' : ''}" ${idAttr(o)} style="top:${at(o.s)};height:max(20px, ${at(o.e - o.s)} - 2px);left:calc(${(o.lane / n) * 100}% + ${2 + ind}px);width:calc(${100 / n}% - ${4 + ind}px);--c:var(--${o.cat})">
           <b>${esc(o.title)}</b><small>${REPEATS[o.r.repeat] ? '<span class="rep" title="Repeats">↻</span> ' : ''}${clock(o.s, true)} – ${clock(o.e, true)}${o.r.place ? ', ' + esc(o.r.place) : ''}</small></button>`;
       }
       group = [];
@@ -364,19 +367,19 @@
     const anyAll = lists.some(l => l.some(o => o.allDay));
     const all = anyAll ? `<div class="tg-row tg-all"><span class="tg-gut">all day</span>${lists.map(l => `<div class="tg-allc">${l.filter(o => o.allDay).map(chip).join('')}</div>`).join('')}</div>` : '';
     let gutter = '';
-    for (let h = 1; h < 24; h++) gutter += `<span style="top:${h * HOUR}px">${hourLabel(h)}</span>`;
+    for (let h = 1; h < 24; h++) gutter += `<span style="top:${at(h * 60)}">${hourLabel(h)}</span>`;
     const cols = lists.map((l, i) => {
-      const now = keys[i] === t ? `<span class="tg-now" style="top:${(nowMin() / 60) * HOUR}px"></span>` : '';
+      const now = keys[i] === t ? `<span class="tg-now" style="top:${at(nowMin())}"></span>` : '';
       // sleep sits behind the events as a shaded stretch
-      const zz = sleepOn(keys[i]).map(o => `<button type="button" class="tg-sleep" data-sleep="1" style="top:${(o.s / 60) * HOUR}px;height:${((o.e - o.s) / 60) * HOUR}px"><span>Sleep</span></button>`).join('');
+      const zz = sleepOn(keys[i]).map(o => `<button type="button" class="tg-sleep" data-sleep="1" style="top:${at(o.s)};height:${at(o.e - o.s)}"><span>Sleep</span></button>`).join('');
       // a status ("Working") is a shaded stretch with its name, the events inside it on top
       const bl = timed(l).filter(o => o.block), evs = timed(l).filter(o => !o.block);
-      const bz = bl.map(o => `<button type="button" class="tg-block" ${idAttr(o)} style="top:${(o.s / 60) * HOUR}px;height:${((o.e - o.s) / 60) * HOUR}px;--c:var(--${CATS[o.cat] ? o.cat : 'personal'})"><span>${esc(o.title)}</span><small>${clock(o.s, true)} – ${clock(o.e, true)}</small></button>`).join('');
+      const bz = bl.map(o => `<button type="button" class="tg-block" ${idAttr(o)} style="top:${at(o.s)};height:${at(o.e - o.s)};--c:var(--${CATS[o.cat] ? o.cat : 'personal'})"><span>${esc(o.title)}</span><small>${clock(o.s, true)} – ${clock(o.e, true)}</small></button>`).join('');
       const inner = evs.filter(o => bl.some(b => o.s < b.e && o.e > b.s)), outer = evs.filter(o => !inner.includes(o));
       return `<div class="tg-col${keys[i] === t ? ' today' : ''}" data-day="${keys[i]}">${zz}${bz}${placeEvents(outer)}${placeEvents(inner, multi ? 5 : 10)}${now}</div>`;
     }).join('');
     return `<section class="card tg" style="--n:${days.length}">${head}${all}
-      <div class="tg-scroll"><div class="tg-row tg-body" style="height:${24 * HOUR}px"><div class="tg-gut tg-hours">${gutter}</div>${cols}</div></div></section>`;
+      <div class="tg-scroll"><div class="tg-row tg-body" style="height:calc(24 * var(--hour));--hour:${HOUR}px"><div class="tg-gut tg-hours">${gutter}</div>${cols}</div></div></section>`;
   }
   const vDay = () => timeGrid([parse(S.cursor)]);
   const vWeek = () => { const w0 = weekStart(parse(S.cursor)); return timeGrid([...Array(7)].map((_, i) => addDays(w0, i))); };
@@ -502,7 +505,7 @@
     if (fresh) v.innerHTML = `<section class="hero" id="dial"></section><div id="calTab">${bar()}<div id="cal"></div></div>${tabs()}`;
     setTab(S.tab, !fresh);
   }
-  setInterval(() => { if (S.user && !tw && !MV && $('#dial')) { if (S.tab === 'dial') paintDial(); else if (S.view === 'day' || S.view === 'week') renderCal(); } }, 60000);
+  setInterval(() => { if (S.user && !tw && !MV && !G && $('#dial')) { if (S.tab === 'dial') paintDial(); else if (S.view === 'day' || S.view === 'week') renderCal(); } }, 60000);
 
   function go(dayStr, view) {
     S.cursor = dayStr;
@@ -524,7 +527,7 @@
     const r = row || {
       kind: 'event', title: '', category: 'personal', day: S.cursor, place: '', notes: '',
       start_time: toTime(preset?.start ?? (S.cursor === today() ? Math.min(23 * 60, Math.ceil((nowMin() + 1) / 60) * 60) : 9 * 60)),
-      end_time: null,
+      end_time: preset && preset.end != null ? toTime(preset.end) : null,
     };
     if (!row && !r.end_time) r.end_time = toTime(Math.min(toMin(r.start_time) + 60, 1439));
     ED = { id: row ? row.id : null, kind: r.kind, cat: r.category || 'personal', orig: row, repeat: REPEATS[r.repeat] ? r.repeat : '', occ: row && REPEATS[row.repeat] ? occ || row.day : null };
@@ -547,7 +550,9 @@
     </form>`;
     syncEditor();
     $('#scrim').hidden = false; $('#sheet').hidden = false;
-    requestAnimationFrame(() => { $('#sheet').classList.add('in'); if (!row) $('#ed_title').focus(); });
+    // focusing right away (still inside the tap or let-go) is what lets the iPhone bring up the keyboard
+    if (!row) $('#ed_title').focus({ preventScroll: true });
+    requestAnimationFrame(() => $('#sheet').classList.add('in'));
   }
   function syncEditor() {
     const f = $('#edForm'); if (!f) return;
@@ -805,27 +810,31 @@
   });
   async function dropMoved() {
     const mv = MV; MV = null;
-    const dayN = Math.floor(mv.s / 1440), start = ((mv.s % 1440) + 1440) % 1440, end = Math.min(start + mv.dur, 1439);
-    const day = ymd(addDays(parse(today()), dayN)), patch = { day, start_time: toTime(start), end_time: toTime(end) };
+    const dayN = Math.floor(mv.s / 1440), start = ((mv.s % 1440) + 1440) % 1440;
+    await moveEvent(mv.row, ymd(addDays(parse(today()), mv.occDay)), ymd(addDays(parse(today()), dayN)), start, mv.dur);
+  }
+  const repaint = () => { if (S.tab === 'dial') paintDial(); else renderCal(); };
+  // moves one occurrence (occ) of an event to a new day and start, same length; used by the dial and the grid
+  async function moveEvent(row, occ, day, start, dur) {
+    const end = Math.min(start + dur, 1439), patch = { day, start_time: toTime(start), end_time: toTime(end) };
+    const where = `${day === today() ? '' : fmt(parse(day), { weekday: 'short' }) + ' '}${clock(start)}`;
+    if (occ === day && patch.start_time === (row.start_time || '').slice(0, 5)) { repaint(); return; }
     // a repeating event asks whether the move is for only this one, this one and after, or all of them
-    if (isRep(mv.row)) {
-      const occ = ymd(addDays(parse(today()), mv.occDay));
-      paintDial();
-      if (occ === day && patch.start_time === (mv.row.start_time || '').slice(0, 5)) return;
+    if (isRep(row)) {
+      repaint();
       const scope = await askScope('Move');
       if (!scope) return;
       try {
-        const undo = await changeSeries(mv.row, occ, { ...fields(mv.row), ...patch }, scope); await load();
-        toast(`Moved to ${dialTime(mv.s, true)}${scope === 'all' ? ', all of them' : scope === 'following' ? ', this and after' : ''}`, async () => { await undo(); load(); });
+        const undo = await changeSeries(row, occ, { ...fields(row), ...patch }, scope); await load();
+        toast(`Moved to ${where}${scope === 'all' ? ', all of them' : scope === 'following' ? ', this and after' : ''}`, async () => { await undo(); load(); });
       } catch (e) { toast('Could not move it. Try again.'); load(); }
       return;
     }
-    const before = { day: mv.row.day, start_time: mv.row.start_time, end_time: mv.row.end_time };
-    if (patch.day === before.day && patch.start_time === (before.start_time || '').slice(0, 5)) { paintDial(); return; }
-    Object.assign(mv.row, patch); index(S.rows); paintDial(); // show it in its new place right away
+    const before = { day: row.day, start_time: row.start_time, end_time: row.end_time };
+    Object.assign(row, patch); index(S.rows); repaint(); // show it in its new place right away
     try {
-      await db.update(mv.id, patch); await load();
-      toast(`Moved to ${dialTime(mv.s, true)}`, async () => { await db.update(mv.id, before); load(); });
+      await db.update(row.id, patch); await load();
+      toast(`Moved to ${where}`, async () => { await db.update(row.id, before); load(); });
     } catch (e) { toast('Could not move it. Try again.'); load(); }
   }
   const endPointer = () => {
@@ -919,10 +928,131 @@
     else if (k === 't') go(today()); else if (k === 'n') openEditor();
     else if ({ d: 'day', w: 'week', m: 'month', y: 'year' }[k]) go(S.cursor, { d: 'day', w: 'week', m: 'month', y: 'year' }[k]);
   });
+  /* ---------- day and week grid gestures ----------
+     - pinch (or ctrl + scroll / trackpad pinch on a computer): zoom the hours, from about two hours on screen out to
+       the whole day.
+     - press and hold an empty spot: a new event appears there (an hour long); keep holding and drag to stretch it over
+       the time you want, let go, and the form opens with those times for you to name it.
+     - press and hold an event: it lifts; drag it to a new time (or, in week view, another day) and let go.
+     Times snap to 15 minutes, or 5 when zoomed in. */
+  const HOUR_MAX = 240;
+  const hourMin = () => { const sc = $('#cal .tg-scroll'); return sc ? Math.max(12, (sc.clientHeight - 2) / 24) : 20; };
+  const snapTo = m => { const s = HOUR >= 96 ? 5 : 15; return Math.round(m / s) * s; };
+  const minuteIn = (col, y) => Math.max(0, Math.min(1440, ((y - col.getBoundingClientRect().top) / HOUR) * 60));
+  function zoomGrid(h, anchorY) {
+    const sc = $('#cal .tg-scroll'); if (!sc) return;
+    h = Math.max(hourMin(), Math.min(HOUR_MAX, h));
+    if (Math.abs(h - HOUR) < 0.3) return;
+    const y = anchorY - sc.getBoundingClientRect().top, t = (sc.scrollTop + y) / HOUR; // keep the time under the fingers in place
+    HOUR = h; store.set('hour', String(Math.round(h)));
+    // only the --hour value changes (no redraw), so the fingers keep hold of the grid mid-pinch
+    sc.querySelector('.tg-body').style.setProperty('--hour', h + 'px');
+    sc.scrollTop = t * HOUR - y;
+  }
+  let G = null, gridUsed = false; // the gesture in progress
+  const span = (a, b) => `${clock(a, true)} – ${clock(b, true)}`;
+  function gridDown(x, y, target) {
+    const sc = target.closest && target.closest('#cal .tg-scroll'); if (!sc) return;
+    const evEl = target.closest('.tg-ev[data-id]'), col = target.closest('.tg-col');
+    if (!col) return;
+    G = { mode: 'wait', x, y, col };
+    G.timer = setTimeout(() => {
+      if (!G || G.mode !== 'wait') return;
+      const row = evEl && byId(evEl.dataset.id);
+      if (evEl && row && row.start_time) {
+        // lift the event
+        const s = toMin(row.start_time); let e = toMin(row.end_time); if (e == null) e = s + 60; if (e <= s) e = 1440;
+        G = { mode: 'move', el: evEl, row, occ: evEl.dataset.occ || row.day, col, dur: e - s, grab: minuteIn(col, y) - s, s, day: col.dataset.day };
+        evEl.classList.add('lifted');
+      } else if (!evEl) {
+        // a new event, an hour long, starting where the finger is
+        const st = HOUR >= 96 ? 5 : 15, a = Math.min(1380, Math.floor(minuteIn(col, y) / st) * st);
+        const el = document.createElement('div'); el.className = 'tg-draft';
+        col.appendChild(el);
+        G = { mode: 'draw', el, col, anchor: a, a, b: a + 60, y0: y };
+        drawDraft();
+      } else { G = null; return; }
+      gridUsed = true;
+    }, 450);
+  }
+  function drawDraft() {
+    G.el.style.top = (G.a / 60) * HOUR + 'px'; G.el.style.height = ((G.b - G.a) / 60) * HOUR + 'px';
+    G.el.innerHTML = `<b>New event</b><small>${span(G.a, G.b)}</small>`;
+  }
+  function gridMove(x, y) {
+    if (!G) return false;
+    if (G.mode === 'wait') { if (Math.hypot(x - G.x, y - G.y) > 8) { clearTimeout(G.timer); G = null; } return false; }
+    if (G.mode === 'draw') {
+      // once the finger moves, the event runs from where it started to where the finger is
+      if (Math.abs(y - G.y0) > 10) {
+        const f = snapTo(minuteIn(G.col, y));
+        G.a = Math.min(G.anchor, f); G.b = Math.max(G.anchor, f);
+        if (G.b - G.a < 15) G.b = Math.min(1440, G.a + 15);
+      }
+      drawDraft(); return true;
+    }
+    if (G.mode === 'move') {
+      // in week view the event can change columns (days)
+      const cols = [...document.querySelectorAll('#cal .tg-col')];
+      const col = cols.find(c => { const r = c.getBoundingClientRect(); return x >= r.left && x < r.right; }) || G.col;
+      if (col !== G.el.parentNode) { col.appendChild(G.el); G.el.style.left = '2px'; G.el.style.width = 'calc(100% - 4px)'; }
+      G.col = col; G.day = col.dataset.day;
+      G.s = Math.max(0, Math.min(1440 - Math.min(G.dur, 1440), snapTo(minuteIn(col, y) - G.grab)));
+      G.el.style.top = (G.s / 60) * HOUR + 'px';
+      const sm = G.el.querySelector('small'); if (sm) sm.textContent = span(G.s, G.s + G.dur);
+      return true;
+    }
+    return false;
+  }
+  function gridUp() {
+    if (!G) return;
+    const g = G; G = null; clearTimeout(g.timer);
+    if (g.mode === 'wait') return;
+    if (g.mode === 'pinch') { setTimeout(renderCal, 0); return; } // redraw once at the new zoom (short events get their compact look)
+    twisted = true; setTimeout(() => { twisted = false; }, 350); // the lift-off isn't a tap
+    if (g.mode === 'draw') {
+      S.cursor = g.col.dataset.day;
+      openEditor(null, { start: g.a, end: Math.min(g.b, 1439) });
+      setTimeout(() => g.el.remove(), 200);
+    } else if (g.mode === 'move') moveEvent(g.row, g.occ, g.day, g.s, g.dur);
+  }
+  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  $('#view').addEventListener('touchstart', e => {
+    if (!e.target.closest('#cal .tg-scroll')) return;
+    if (e.touches.length === 2) {
+      if (G && G.timer) clearTimeout(G.timer);
+      if (G && G.el && G.mode === 'draw') G.el.remove();
+      G = { mode: 'pinch', d0: dist(e.touches), h0: HOUR }; gridUsed = true; return;
+    }
+    if (e.touches.length === 1) gridDown(e.touches[0].clientX, e.touches[0].clientY, e.target);
+  }, { passive: true });
+  $('#view').addEventListener('touchmove', e => {
+    if (!G) return;
+    if (G.mode === 'pinch' && e.touches.length === 2) {
+      e.preventDefault();
+      zoomGrid(G.h0 * dist(e.touches) / G.d0, (e.touches[0].clientY + e.touches[1].clientY) / 2); return;
+    }
+    if (gridMove(e.touches[0].clientX, e.touches[0].clientY)) e.preventDefault(); // dragging, so don't scroll
+  }, { passive: false });
+  $('#view').addEventListener('touchend', e => { if (G && (G.mode !== 'pinch' || e.touches.length === 0)) gridUp(); });
+  $('#view').addEventListener('touchcancel', () => { if (G && G.el && G.mode === 'draw') G.el.remove(); if (G) clearTimeout(G.timer); G = null; renderCal(); });
+  // the same with a mouse
+  document.addEventListener('mousedown', e => { if (e.button === 0 && !('ontouchstart' in window && e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents)) gridDown(e.clientX, e.clientY, e.target); });
+  window.addEventListener('mousemove', e => { if (G && G.mode !== 'pinch') gridMove(e.clientX, e.clientY); });
+  window.addEventListener('mouseup', () => { if (G && G.mode !== 'pinch') gridUp(); });
+  document.addEventListener('wheel', e => {
+    if (!e.ctrlKey || !e.target.closest('#cal .tg-scroll')) return;
+    e.preventDefault(); zoomGrid(HOUR * Math.exp(-e.deltaY * 0.01), e.clientY);
+    clearTimeout(zoomT); zoomT = setTimeout(renderCal, 250);
+  }, { passive: false });
+  let zoomT = null;
+  document.addEventListener('contextmenu', e => { if (e.target.closest('#cal .tg-scroll')) e.preventDefault(); });
+
   // swipe left/right on the calendar to move through days, weeks, months
   let sx0 = null, sy0 = null;
-  $('#view').addEventListener('touchstart', e => { if (!e.target.closest('#cal')) { sx0 = null; return; } sx0 = e.touches[0].clientX; sy0 = e.touches[0].clientY; }, { passive: true });
+  $('#view').addEventListener('touchstart', e => { if (e.touches.length === 1) gridUsed = false; if (!e.target.closest('#cal') || e.touches.length > 1) { sx0 = null; return; } sx0 = e.touches[0].clientX; sy0 = e.touches[0].clientY; }, { passive: true });
   $('#view').addEventListener('touchend', e => {
+    if (gridUsed) { sx0 = null; return; } // a pinch, new event or move isn't a swipe
     if (sx0 == null || !S.user) return;
     const dx = e.changedTouches[0].clientX - sx0, dy = e.changedTouches[0].clientY - sy0;
     if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) step(dx < 0 ? 1 : -1);
